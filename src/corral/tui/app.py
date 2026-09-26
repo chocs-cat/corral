@@ -19,8 +19,10 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.content import Content
 from textual.coordinate import Coordinate
 from textual.css.query import NoMatches
+from textual.events import Click
 from textual.widgets import (
     DataTable,
     Footer,
@@ -87,6 +89,13 @@ class ProjectTable(DataTable):
         self.corral.toggle_current()
 
 
+class FixedHeader(Header):
+    """A Header that stays one line: Textual's grows taller on click."""
+
+    def on_click(self, event: Click) -> None:
+        event.prevent_default()  # stops Header's own handler, later in the MRO
+
+
 class CorralApp(App):
     TITLE = "corral"
     CSS = """
@@ -149,8 +158,13 @@ class CorralApp(App):
 
     # layout
 
+    def format_title(self, title: str, sub_title: str) -> Content:
+        if not sub_title:
+            return Content(title)
+        return Content.assemble(title, (f" {labels.BULLET} ", "dim"), (sub_title, "dim"))
+
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield FixedHeader()
         yield Static(id="error")
         yield Input(placeholder="filter projects (matches the path)…", id="filter")
         with Horizontal(id="main"):
