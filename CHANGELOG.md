@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/johnfoland/corral/compare/v0.3.0...v0.4.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* `corral up --fill` and `--force-fill` are gone, and up's JSON result drops the `closed` and `kept_running` fields.
+
+### Features
+
+* remove fill and force-fill ([#17](https://github.com/johnfoland/corral/issues/17)) ([a756a99](https://github.com/johnfoland/corral/commit/a756a99f3395d03386b86bd9ac32ae82be7d21e0))
+
+
+### Bug Fixes
+
+* **tui:** keep the header one line on click; separate the root with • ([#18](https://github.com/johnfoland/corral/issues/18)) ([d5df227](https://github.com/johnfoland/corral/commit/d5df227829b28ec6d53683c05b21bbbb71aa0708))
+
 ## [0.3.0](https://github.com/johnfoland/corral/compare/v0.2.0...v0.3.0) (2026-09-26)
 
 
