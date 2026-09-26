@@ -50,14 +50,10 @@ the path.
 corral up ~/Code/courses --json                     # build, or focus if it exists
 corral up ~/Code/api --agent opus/high --json       # choose the agent tab(s); repeatable
 corral up ~/Code/notes --no-agent --json            # utility tab only
-corral up ~/Code/courses --fill --agent opus/high --json   # top up an existing one
 ```
 
-If the workspace exists, `up` only focuses it. `--fill` adds whichever tabs
-it lacks and is safe to repeat. `--force-fill` fills, then closes every tab
-that is neither the utility tab nor an agent tab; tabs hosting a live agent
-are kept and reported. When the user asks to force-fill, just run it. Use
-`--dry-run` only if they want to see the plan first.
+If the workspace exists, `up` only focuses it and changes nothing; add
+agent tabs to it with `corral tab`.
 
 `--no-focus` leaves the user's focus where it is. Use it when acting in the
 background.

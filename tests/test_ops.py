@@ -28,24 +28,14 @@ def test_up_home_is_labelled_tilde(herdr, cfg, home):
     assert labels_in(herdr, res.workspace)[0] == "~"
 
 
-def test_up_existing_focuses_and_fill_is_idempotent(herdr, cfg, root):
+def test_up_existing_focuses_and_changes_nothing(herdr, cfg, root):
     first = ops.up(herdr, cfg, root / "courses")
-    again = ops.up(herdr, cfg, root / "courses")
+    before = labels_in(herdr, first.workspace)
+    again = ops.up(herdr, cfg, root / "courses", agents=["sonnet", "opus/high"])
     assert again.action == "focused"
     assert again.workspace == first.workspace
-    filled = ops.up(herdr, cfg, root / "courses", fill=True, agents=["sonnet", "opus/high"])
-    assert [(t.label, t.action) for t in filled.tabs] == [
-        ("courses", "have"),
-        (f"Sonnet{B}medium", "have"),
-        (f"Opus{B}high", "added"),
-    ]
-
-
-def test_fill_treats_legacy_spaced_label_as_present(herdr, cfg, root):
-    ws, _tab, _ = herdr.create_workspace(str(root / "courses"), "courses")
-    herdr.create_tab(ws, str(root / "courses"), f"Sonnet {B} medium")
-    res = ops.up(herdr, cfg, root / "courses", fill=True, dry_run=True)
-    assert (f"Sonnet{B}medium", "have") in [(t.label, t.action) for t in res.tabs]
+    assert not again.tabs
+    assert labels_in(herdr, first.workspace) == before
 
 
 def test_new_agent_tab_gets_suffix_and_unique_agent_name(herdr, cfg, root):
@@ -84,20 +74,6 @@ def test_unknown_model_fails_before_touching_herdr(herdr, cfg, root):
     with pytest.raises(ConfigError, match="unknown model"):
         ops.up(herdr, cfg, root / "courses", agents=["nope"])
     assert not herdr.ws
-
-
-def test_force_fill_closes_strays_keeps_agents(herdr, cfg, root):
-    ws = ops.up(herdr, cfg, root / "courses").workspace
-    stray, _ = herdr.create_tab(ws, "/tmp", "zsh")
-    busy, busy_pane = herdr.create_tab(ws, "/tmp", "manual claude")
-    herdr.agents[busy_pane] = {"name": "", "kind": "claude", "args": [], "status": "idle"}
-    plan = ops.up(herdr, cfg, root / "courses", force_fill=True, dry_run=True)
-    assert plan.closed == ["zsh"]
-    assert plan.kept_running == ["manual claude"]
-    assert stray in herdr.tabs  # dry run changed nothing
-    ops.up(herdr, cfg, root / "courses", force_fill=True)
-    assert stray not in herdr.tabs
-    assert busy in herdr.tabs
 
 
 def test_stop_by_label_name_and_all(herdr, cfg, root):

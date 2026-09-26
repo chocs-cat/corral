@@ -1,7 +1,7 @@
 """corral command line.
 
     corral                      the TUI (on a terminal), else help
-    corral up [DIR] ...         build / focus / fill a project workspace
+    corral up [DIR] ...         build / focus a project workspace
     corral tab SPEC... ...      open agent tab(s)
     corral stop TARGET... ...   stop agents
     corral close WS... ...      close whole workspaces
@@ -84,8 +84,6 @@ def cmd_up(ctx: Ctx) -> int:
         label=a.label,
         agents=a.agent or None,
         no_agent=a.no_agent,
-        fill=a.fill,
-        force_fill=a.force_fill,
         dry_run=a.dry_run,
         new=a.new,
         focus=not a.no_focus,
@@ -322,7 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser(
         "up",
         parents=[common],
-        help="build, focus or fill a project workspace",
+        help="build or focus a project workspace",
         description="Build a project workspace (utility tab + agent tabs), or "
         "focus it if it exists. The label defaults to the path "
         "relative to the root (cruzainet/api), else the basename.",
@@ -336,16 +334,6 @@ def build_parser() -> argparse.ArgumentParser:
         help='agent tab "model[/effort]", repeatable (default: config default_agents)',
     )
     up.add_argument("--no-agent", action="store_true", help="utility tab only")
-    g = up.add_mutually_exclusive_group()
-    g.add_argument(
-        "--fill", action="store_true", help="on an existing workspace, add whichever tabs it lacks"
-    )
-    g.add_argument(
-        "--force-fill",
-        action="store_true",
-        help="--fill, then close tabs that are neither utility nor agent tabs "
-        "(tabs with a live agent are kept)",
-    )
     up.add_argument("-n", "--dry-run", action="store_true", help="report the plan only")
     up.add_argument(
         "--new", action="store_true", help="build another workspace even if the label is taken"

@@ -1,4 +1,4 @@
-"""The operations behind every command: build/fill a workspace, open an
+"""The operations behind every command: build a workspace, open an
 agent tab, stop agents, close workspaces.
 
 Each takes a Herdr (real or fake), reports progress lines through `report`,
@@ -55,10 +55,8 @@ class UpResult:
     workspace: str
     label: str
     path: str
-    action: str  # created | focused | filled | planned
+    action: str  # created | focused | planned
     tabs: list[TabResult] = field(default_factory=list)
-    closed: list[str] = field(default_factory=list)  # force-fill: closed tab labels
-    kept_running: list[str] = field(default_factory=list)  # force-fill: kept for a live agent
 
     @property
     def ok(self) -> bool:
@@ -216,29 +214,6 @@ def make_agent_tab(
     return TabResult(label, "added", agent=name, pane=pane)
 
 
-def force_fill_plan(
-    snap: Snapshot, cfg: Config, ws: str, util_label: str
-) -> list[tuple[str, str, str]]:
-    """Classify every tab of ws: (action, tab_id, label) where action is
-    keep-util | keep-agent | keep-running | close. Only tabs that are neither
-    the utility tab nor a "<Model>•<effort>" tab, and host no live agent, close."""
-    displays = {m.display.lower() for m in cfg.models}
-    live = {a.tab_id for a in snap.agents}
-    out = []
-    for t in snap.tabs_in(ws):
-        p = labels.parse(t.label)
-        if t.label == util_label:
-            act = "keep-util"
-        elif p and p.display.lower() in displays:
-            act = "keep-agent"
-        elif t.id in live:
-            act = "keep-running"
-        else:
-            act = "close"
-        out.append((act, t.id, t.label))
-    return out
-
-
 # --- commands ---------------------------------------------------------------
 
 
@@ -250,21 +225,16 @@ def up(
     label: str | None = None,
     agents: list[str] | None = None,
     no_agent: bool = False,
-    fill: bool = False,
-    force_fill: bool = False,
     dry_run: bool = False,
     new: bool = False,
     focus: bool = True,
     timeout_ms: int | None = None,
     report: Report = _quiet,
 ) -> UpResult:
-    """Build a project workspace, or focus/fill/force-fill an existing one.
+    """Build a project workspace, or focus an existing one.
 
     no existing workspace   -> build it
-    existing, default       -> focus it, change nothing
-    existing, fill          -> add whichever tabs it lacks
-    existing, force_fill    -> fill, then close every tab that is not the
-                               utility tab or an agent tab (live agents kept)
+    existing                -> focus it, change nothing
     new                     -> build another even if the label is taken
     """
     path = path.expanduser().resolve()
@@ -272,7 +242,6 @@ def up(
         raise ConfigError(f"not a directory: {path}")
     label = label or label_for(path, cfg.root)
     specs = [] if no_agent else (agents or list(cfg.default_agents))
-    fill = fill or force_fill
     for s in specs:
         cfg.model(parse_spec(s)[0])  # unknown model -> ConfigError before touching herdr
     cwd = str(path)
@@ -283,73 +252,10 @@ def up(
     if existing:
         ws = existing.id
         label = existing.label  # a legacy basename-labelled match keeps its label
-        if not fill:
-            report(f"workspace '{label}' already exists ({ws}) — focusing it")
-            if focus and not dry_run:
-                h.focus_workspace(ws)
-            return UpResult(ws, label, cwd, "focused")
-
-        res = UpResult(ws, label, cwd, "planned" if dry_run else "filled")
-        report(
-            f"workspace {ws} '{label}'"
-            + (
-                " — dry run (nothing will change)"
-                if dry_run
-                else " already exists — filling in missing tabs"
-            )
-        )
-        tabs = snap.tabs_in(ws)
-        has_util = any(t.label == label for t in tabs)
-        if cfg.utility.enabled:
-            if has_util:
-                report(f"  have   {label} (utility)")
-                res.tabs.append(TabResult(label, "have"))
-            elif dry_run:
-                report(f"  build  {label} (utility)")
-                res.tabs.append(TabResult(label, "build"))
-            else:
-                tab, pane = h.create_tab(ws, cwd, label)
-                build_utility_tab(h, cfg, tab, pane, cwd, label, report)
-                res.tabs.append(TabResult(label, "added", pane=pane))
-        for s in specs:
-            if dry_run:
-                key, effort = parse_spec(s)
-                m = cfg.model(key)
-                want = labels.AgentLabel(m.display, effort)
-                lbl = labels.tab_label(m.display, effort)
-                have = any((p := labels.parse(t.label)) and p.same_kind(want) for t in tabs)
-                report(f"  {'have ' if have else 'build'}  {lbl}")
-                res.tabs.append(TabResult(lbl, "have" if have else "build"))
-            else:
-                res.tabs.append(
-                    make_agent_tab(h, cfg, ws, cwd, s, timeout_ms=timeout_ms, report=report)
-                )
-        if force_fill:
-            plan = force_fill_plan(h.snapshot() if not dry_run else snap, cfg, ws, label)
-            if not dry_run:
-                report("  force-fill: reconciling tabs")
-            for act, tid, lab in plan:
-                if act == "keep-running":
-                    report(f"  keep   {lab} (agent running — not closed)", error=True)
-                    res.kept_running.append(lab)
-                elif act == "keep-agent" and dry_run:
-                    report(f"  keep   {lab} (agent tab)")
-                elif act == "close":
-                    if dry_run:
-                        report(f"  CLOSE  {lab} ({tid})")
-                        res.closed.append(lab)
-                        continue
-                    try:
-                        h.close_tab(tid)
-                        report(f"  closed {lab} ({tid})")
-                        res.closed.append(lab)
-                    except HerdrError as e:
-                        report(f"  FAILED to close {lab} ({tid}): {e.message}", error=True)
+        report(f"workspace '{label}' already exists ({ws}) — focusing it")
         if focus and not dry_run:
             h.focus_workspace(ws)
-        if not dry_run:
-            report(f"ready: {ws}")
-        return res
+        return UpResult(ws, label, cwd, "focused")
 
     if dry_run:
         report(f"no workspace '{label}' yet — dry run would build:")

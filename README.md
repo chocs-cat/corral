@@ -17,7 +17,7 @@ scripts and coding agents.
 │ ○   ├─ api                                develop       │ kind     git repo
 │ ○   ├─ web-app                            style/visual… │ nested   8 repos below
 │ ○   └─ specs                              master        │ branch   master
-└ o Open  a Add agent  f Fill  s Stop  x Close WS  / Filter ┘
+└ o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter ┘
 ```
 
 ## Install
@@ -39,7 +39,6 @@ installs a `corral` command, so the two can't be installed together.)
 corral                                  # the TUI
 corral up ~/Code/api                    # build the workspace, or focus it if it exists
 corral up ~/Code/api --agent opus/high --agent codex/xhigh
-corral up --fill                        # add whatever tabs the current project's workspace lacks
 corral tab opus/high                    # an agent tab in the workspace you're in
 corral tab sonnet --new                 # another one: Sonnet•medium-2
 corral stop "Opus•high"                 # by tab label, agent name or pane id
@@ -71,9 +70,8 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 |---|---|
 | `o` / enter | open: build the workspace, or switch to it |
 | `a` | add an agent tab: pick a model, then an effort (always a new tab) |
-| `f` / `u` | add any missing tabs / only the utility tab |
+| `u` | open with only the utility tab (switches to an existing workspace) |
 | `s` | stop running agents (pick them) |
-| `F` | force-fill: shows the plan, runs on `y` |
 | `x` | close the workspace: shows what goes with it, runs on `y` |
 | `→` `←` space | unfold / fold / toggle the tree |
 | `/` `g` `q` | filter, refresh, quit |

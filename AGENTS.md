@@ -61,8 +61,7 @@ a bug, stopped and closed the user's real workspace. So:
   by the exact id the create call returned, with the label checked before
   any stop or close. Never take a target from a listing.
 - Use a scratch root (`--root`), never the user's real one.
-- Never close, stop or force-fill a workspace, tab or agent you didn't
-  create.
+- Never close or stop a workspace, tab or agent you didn't create.
 - A claude agent started in a new directory waits at its trust prompt
   (herdr status `blocked`). That's expected in a scratch root.
 

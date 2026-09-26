@@ -113,3 +113,11 @@ and pinned to an exact version while it is pre-1.0 so an upgrade can't
 break CI unannounced. `master` requires the aggregate **CI passed** check
 (lint, the test matrix and a packaging check) and a Conventional Commit PR
 title.
+
+## No fill or force-fill (2026-09)
+
+`corral up --fill` (and the TUI's `f`), which added the tabs an existing
+workspace lacked, and `--force-fill` (`F`), which also closed tabs that were
+neither the utility tab nor an agent tab, were removed and stay out. `up` on
+an existing workspace only focuses it; agent tabs are added with
+`corral tab` (the TUI's `a`).

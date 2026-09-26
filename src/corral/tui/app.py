@@ -113,10 +113,8 @@ class CorralApp(App):
     BINDINGS = [
         Binding("o", "open", "Open"),
         Binding("a", "add_agent", "Add agent"),
-        Binding("f", "fill", "Fill"),
-        Binding("u", "utility", "Utility only"),
+        Binding("u", "utility", "Utility"),
         Binding("s", "stop", "Stop"),
-        Binding("F", "force_fill", "Force-fill"),
         Binding("x", "close_ws", "Close WS"),
         Binding("slash", "filter", "Filter"),
         Binding("g", "rescan", "Refresh"),
@@ -187,8 +185,8 @@ class CorralApp(App):
     # App bindings apply on every screen, so without this, `x` pressed in a
     # dialog or in Settings would act on the project list behind it.
     MAIN_SCREEN_ACTIONS = frozenset(
-        {"open", "add_agent", "fill", "utility", "stop", "force_fill", "close_ws", "filter",
-         "rescan", "clear_filter", "settings", "quit"}
+        {"open", "add_agent", "utility", "stop", "close_ws", "filter", "rescan",
+         "clear_filter", "settings", "quit"}
     )  # fmt: skip
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
@@ -578,30 +576,16 @@ class CorralApp(App):
         if p := self.target():
             self.run_op(p.rel, f"up {p.rel}", ops.up, self.cfg, p.path, label=self.ws_label(p))
 
-    def action_fill(self) -> None:
-        if p := self.target():
-            self.run_op(
-                p.rel,
-                f"up {p.rel} --fill",
-                ops.up,
-                self.cfg,
-                p.path,
-                label=self.ws_label(p),
-                fill=True,
-                focus=False,
-            )
-
     def action_utility(self) -> None:
         if p := self.target():
             self.run_op(
                 p.rel,
-                f"up {p.rel} --no-agent --fill",
+                f"up {p.rel} --no-agent",
                 ops.up,
                 self.cfg,
                 p.path,
                 label=self.ws_label(p),
                 no_agent=True,
-                fill=True,
             )
 
     def action_add_agent(self) -> None:
@@ -659,31 +643,6 @@ class CorralApp(App):
                 self.run_op(p.rel, f"stop {' '.join(panes)}", ops.stop, self.cfg, panes, ws=ws.id)
 
         self.push_screen(StopPicker(f"Stop agents in [b]{p.rel}[/b] ({ws.id})", running), picked)
-
-    @work(group="ops")
-    async def action_force_fill(self) -> None:
-        p = self.target()
-        if not p:
-            return
-        ok, plan = await self.plan(
-            ops.up, self.cfg, p.path, label=self.ws_label(p), force_fill=True
-        )
-        if not ok:
-            self.log_line(f"  force-fill plan failed: {plan}", error=True)
-            return
-        if await self.push_screen_wait(
-            Confirm(f"Force-fill [b]{p.rel}[/b]? Tabs marked CLOSE are closed.", plan)
-        ):
-            self.run_op(
-                p.rel,
-                f"up {p.rel} --force-fill",
-                ops.up,
-                self.cfg,
-                p.path,
-                label=self.ws_label(p),
-                force_fill=True,
-                focus=False,
-            )
 
     @work(group="ops")
     async def action_close_ws(self) -> None:
