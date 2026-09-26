@@ -1,7 +1,9 @@
 """Drive the TUI headlessly against the fake herdr."""
 
+from textual.widgets._header import HeaderTitle
+
 from corral import ops
-from corral.tui.app import AgentPicker, Confirm, CorralApp
+from corral.tui.app import AgentPicker, Confirm, CorralApp, FixedHeader
 
 B = "•"
 
@@ -35,6 +37,16 @@ async def test_tree_folds_and_open_builds_nested_workspace(herdr, cfg):
         assert "cruzainet/api" not in rows(app)
         await pilot.press("space")  # space toggles the fold
         assert "cruzainet/api" in rows(app)
+
+
+async def test_header_stays_one_line_and_uses_bullet(herdr, cfg):
+    app = CorralApp(cfg, herdr)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        assert app.format_title(app.title, app.sub_title).plain.endswith(f" {B} {app.sub_title}")
+        await pilot.click(HeaderTitle)
+        await pilot.pause()
+        assert not app.query_one(FixedHeader).has_class("-tall")
 
 
 async def test_home_stays_first_and_opens_as_tilde(herdr, cfg, root, home):
