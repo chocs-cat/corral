@@ -24,9 +24,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/johnfoland/corral"
-Changelog = "https://github.com/johnfoland/corral/blob/master/CHANGELOG.md"
-Issues = "https://github.com/johnfoland/corral/issues"
+Homepage = "https://github.com/chocs-cat/corral"
+Changelog = "https://github.com/chocs-cat/corral/blob/master/CHANGELOG.md"
+Issues = "https://github.com/chocs-cat/corral/issues"
 
 [project.scripts]
 corral = "corral.cli:main"

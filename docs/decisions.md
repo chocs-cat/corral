@@ -21,7 +21,7 @@ of the earlier mix of bash scripts and Python. Python 3.11+ (`tomllib`).
 PyPI rejects `corral` as too similar to the existing `corrai` (it treats
 `l` and `i` as look-alikes), and homebrew/core's `corral` is the Pony package
 manager. So the PyPI distribution and the Homebrew formula
-(`johnfoland/tap/corral-herdr`) are `corral-herdr`; the command, the import
+(`chocs-cat/tap/corral-herdr`) are `corral-herdr`; the command, the import
 package, the repo and the config path stay `corral`. The formula declares a
 conflict with core's `corral`, since both install `bin/corral`.
 

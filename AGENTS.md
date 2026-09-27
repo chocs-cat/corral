@@ -16,7 +16,7 @@ the release process, and `skills/corral/SKILL.md` how agents *use* it.
 
 ## Roadmap: GitHub Issues
 
-The roadmap is the issue list on `johnfoland/corral`. Keep it current:
+The roadmap is the issue list on `chocs-cat/corral`. Keep it current:
 
 - **File ideas as issues, don't just mention them.** When you or the user
   come up with a feature, a follow-up, a bug or a loose end you won't handle
