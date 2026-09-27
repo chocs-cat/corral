@@ -1,23 +1,38 @@
-# corral
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/johnfoland/corral/master/docs/logo-dark.svg">
+  <img alt="corral" src="https://raw.githubusercontent.com/johnfoland/corral/master/docs/logo-light.svg" height="64">
+</picture>
 
 Round up your projects into [herdr](https://herdr.dev) workspaces.
 
-corral sets up a herdr workspace for any project under a root directory
-(`~/Code` by default). Each workspace gets a utility tab (file manager, shell
-and git UI by default) and one or more agent tabs, each named for the model
-and effort it runs: `Sonnet•medium`, `Opus•high`, `Codex•xhigh`. Use the TUI
-to browse projects and act with single keys, or the CLI (with `--json`) for
-scripts and coding agents.
+corral sets up a herdr workspace for any project under a root directory. Each
+workspace gets a utility tab (file manager, shell and git UI by default) and
+one or more agent tabs, each named for the model and effort it runs:
+`Sonnet•medium`, `Opus•high`, `Codex•xhigh`. Use the TUI to browse projects
+and act with single keys, or the CLI (with `--json`) for scripts and coding
+agents.
 
 ```
-┌ corral 0.1.0 ─────────────────────────── ~/Code ┐
-│ ● cEntities        wY  ● Opus xhi  ● Opus hi   develop  │ cruzainet
-│ ○ ▸ Archive/ · 5 repos                                   │ ~/Code/cruzainet
-│ ○ ▾ cruzainet                             master        │
-│ ○   ├─ api                                develop       │ kind     git repo
-│ ○   ├─ web-app                            style/visual… │ nested   8 repos below
-│ ○   └─ specs                              master        │ branch   master
-└ o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter ┘
+                                     corral 0.4.0 • ~/Code
+────────────────────────────────────────────────────┬───────────────────────────────────────────
+  Project               WS  Agents        Branch    │ shop/api
+○   ~                                               │ ~/Code/shop/api
+●   blog                w2  ● Sonnet med  main      │
+○ ▾ shop                                  main      │ kind     git repo, nested in the shop repo
+● ├─ api                w1  ● Opus xhi    develop   │ branch   develop  2 changed
+○ ├─ infra                                main      │
+○ └─ web                                  feat/cart │ workspace w1 'shop/api'  2 tabs
+○ ▸ Archive/ · 3 repos                              │   ● Opus•xhigh  working  claude-opus-xhigh
+○   dotfiles                              master    │
+────────────────────────────────────────────────────┴───────────────────────────────────────────
+$ up blog
+workspace w2 'blog' -> /Users/you/Code/blog
+  added  blog (yazi / shell / lazygit)
+  added  Sonnet•medium (claude-sonnet-medium, w2:p4)
+ready: w2
+  done
+────────────────────────────────────────────────────────────────────────────────────────────────
+space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter  g Refresh  , Settings
 ```
 
 ## Install
@@ -55,8 +70,8 @@ command (`corral --root ~/Work ls`).
 ### Projects and labels
 
 Every directory in the root is a project. So is every git repo nested up to
-`scan_depth` levels inside one (`cruzainet/api`), along with the plain folders
-that lead to one (`Archive/AyeAI/`). A project's workspace is labelled with
+`scan_depth` levels inside one (`shop/api`), along with the plain folders
+that lead to one (`Archive/2024/`). A project's workspace is labelled with
 its path relative to the root, so two nested repos that share a name don't
 collide. Hidden directories and dependency/build folders (`node_modules`,
 `vendor`, `dist`, …) are skipped.
