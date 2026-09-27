@@ -64,7 +64,10 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
    (in `pyproject.toml`, `uv.lock`, `src/corral/__init__.py` and
    `.claude-plugin/plugin.json`) and adds a section to `CHANGELOG.md`.
 3. Merging that PR tags `vX.Y.Z` and creates the GitHub release. The
-   `publish` job then builds the package and uploads it to PyPI.
+   `publish` job then builds the package and uploads it to PyPI, and the
+   `formula` workflow writes the Homebrew formula, pushes it to
+   [chocs-cat/homebrew-tap](https://github.com/chocs-cat/homebrew-tap), and
+   installs it from there on macOS to check it.
 
 Don't edit versions or `CHANGELOG.md` by hand. To force a specific version,
 add a `Release-As: 1.0.0` footer to a commit.
@@ -78,6 +81,10 @@ add a `Release-As: 1.0.0` footer to a commit.
   settings. Optionally require approval there.
 - **Actions permissions:** in Settings → Actions → General, allow GitHub
   Actions to create pull requests.
+- **Homebrew tap:** a `TAP_TOKEN` secret, a fine-grained personal access token
+  for `chocs-cat/homebrew-tap` only, with **Contents** read/write. It's an
+  organization secret, shared with the other repos whose releases write to
+  the tap.
 - **CI on release PRs:** a PR opened with the built-in `GITHUB_TOKEN` waits
   for a maintainer to approve its CI run ("action required"). The release
   workflow uses the `RELEASE_PLEASE_TOKEN` secret instead when it exists: a
@@ -89,10 +96,9 @@ add a `Release-As: 1.0.0` footer to a commit.
 ### Homebrew
 
 The formula is `Formula/corral-herdr.rb` in
-[chocs-cat/homebrew-tap](https://github.com/chocs-cat/homebrew-tap). After a
-PyPI release, update `url`/`sha256` to the new sdist and refresh the
-dependency resources with `brew update-python-resources corral-herdr`. That
-command ignores packages uploaded in the last 24 hours, so run it a day after
-the release, or copy the versions from `uv.lock`. Then check it with
-`brew audit --strict chocs-cat/tap/corral-herdr`,
-`brew install --build-from-source chocs-cat/tap/corral-herdr` and `brew test`.
+[chocs-cat/homebrew-tap](https://github.com/chocs-cat/homebrew-tap), written by
+`scripts/formula.py`: don't edit it in the tap, change the script's template.
+It builds from the PyPI sdist, with a `resource` for each runtime dependency
+at the version the release's `uv.lock` pins. To redo a version's formula, run
+the **Formula** workflow by hand with that version, or locally from a checkout
+of its tag: `uv run --script scripts/formula.py X.Y.Z > corral-herdr.rb`.
