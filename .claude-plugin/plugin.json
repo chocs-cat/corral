@@ -1,6 +1,6 @@
 {
   "name": "corral",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Agent skill for corral: build herdr project workspaces, open model/effort agent tabs, stop agents and close workspaces from Claude Code.",
   "author": {
     "name": "John Foland",

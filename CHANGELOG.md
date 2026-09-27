@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/chocs-cat/corral/compare/v0.5.0...v0.5.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* point project URLs and the Homebrew tap at chocs-cat ([#25](https://github.com/chocs-cat/corral/issues/25)) ([7108a68](https://github.com/chocs-cat/corral/commit/7108a6865fb3d74722d34b9e76480d299adb2de8))
+
 ## [0.5.0](https://github.com/johnfoland/corral/compare/v0.4.0...v0.5.0) (2026-09-27)
 
 
