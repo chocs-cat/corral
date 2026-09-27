@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/johnfoland/corral/compare/v0.4.0...v0.5.0) (2026-09-27)
+
+
+### Features
+
+* size the utility tab's panes and install yazi/lazygit from corral ([#22](https://github.com/johnfoland/corral/issues/22)) ([3f7fd7b](https://github.com/johnfoland/corral/commit/3f7fd7b3435c646c10bcaec97a4bdc22e6979e0f))
+
 ## [0.4.0](https://github.com/johnfoland/corral/compare/v0.3.0...v0.4.0) (2026-09-26)
 
 
