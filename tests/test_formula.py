@@ -5,11 +5,13 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from packaging.requirements import Requirement
 
 from corral import __version__
 
 ROOT = Path(__file__).parent.parent
+PYPROJECT_0_1_0 = '[project]\nname = "corral-herdr"\nversion = "0.1.0"\n'
 
 
 def _load() -> ModuleType:
@@ -62,5 +64,13 @@ def test_pins_are_the_locked_runtime_dependencies():
     assert "corral-herdr" not in pins
 
 
-def test_checkout_version():
+def test_checkout_version(tmp_path):
     assert formula.checkout_version() == __version__
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT_0_1_0)
+    assert formula.checkout_version(tmp_path) == "0.1.0"
+
+
+def test_refuses_another_versions_checkout(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT_0_1_0)
+    with pytest.raises(SystemExit, match=r"is 0\.1\.0, not 0\.5\.1"):
+        formula.main(["0.5.1", "--root", str(tmp_path)])
