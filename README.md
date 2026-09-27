@@ -37,16 +37,28 @@ space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter  g Refr
 
 ## Install
 
-Requires Python 3.11+ and herdr 0.8+.
+corral needs herdr 0.8 or later. Install it one of two ways; either gives you
+the `corral` command.
+
+### Homebrew
 
 ```sh
-uv tool install corral-herdr    # or: pipx install corral-herdr
 brew install johnfoland/tap/corral-herdr
 ```
 
-The package is `corral-herdr` on PyPI and in Homebrew; the command it installs
-is `corral`. (homebrew/core's `corral` is the Pony package manager, which also
-installs a `corral` command, so the two can't be installed together.)
+The formula lives in the `johnfoland/tap` tap and brings its own Python. It's
+named `corral-herdr` because homebrew/core's `corral` is the Pony package
+manager, which also installs a `corral` command, so the two can't be installed
+together.
+
+### PyPI
+
+```sh
+uv tool install corral-herdr
+```
+
+This installs the `corral-herdr` package from PyPI into its own environment.
+It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 
 ## Use
 
