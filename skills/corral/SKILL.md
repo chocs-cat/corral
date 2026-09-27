@@ -13,7 +13,7 @@ A corral workspace has one shape:
 
 | Tab | Label | Contents |
 |---|---|---|
-| utility | the project label (`courses`, `shop/api`) | configurable panes; by default yazi on top, a shell bottom-left, lazygit bottom-right |
+| utility | the project label (`courses`, `shop/api`) | configurable panes; by default yazi (file manager) on top, a shell bottom-left (35%), lazygit (git UI) bottom-right (65%) |
 | agent tabs | `<Model>•<effort>` (`Sonnet•medium`, `Opus•high`) | one interactive agent each |
 
 A second tab of the same model and effort is `Sonnet•medium-2`, then `-3`.
@@ -30,6 +30,7 @@ target failed, `2` usage or config error, `3` herdr not running.
 corral ls --json            # every project: path, branch, workspace, agent tabs
 corral ls --open --json     # only projects that have a workspace
 corral models --json        # model keys, tools, effort levels
+corral tools --json         # the utility tab's programs: installed?, how to install
 ```
 
 In `ls` output each project has `workspace: null` or
@@ -99,6 +100,15 @@ on macOS too. `corral config init` writes a commented starter file, and
 from `--root` or `$CORRAL_ROOT`. People can also change every setting from
 the TUI's settings screen (press `,`), so point a user there rather than
 hand-editing the file for them unless they ask.
+
+The `[utility]` table sets each pane's command (`top`, `bottom_left`,
+`bottom_right`; `""` is a plain shell) and the split sizes in percent
+(`top_percent`, `bottom_left_percent`, 10 to 90). A pane whose program isn't
+installed gets a plain shell, and `corral up` reports it. `corral tools --json`
+says whether yazi and lazygit are installed and how corral would install them;
+`corral tools install [yazi|lazygit]` installs them with Homebrew, pacman or
+go. It installs software on the user's machine (pacman runs under sudo), so
+ask before running it.
 
 To add a model, add a `[[models]]` entry with `key`, `tool` (the herdr agent
 kind: claude, codex, gemini, opencode, …), `display` and `args` (`{effort}` is

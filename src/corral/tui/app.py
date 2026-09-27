@@ -32,7 +32,7 @@ from textual.widgets import (
     Static,
 )
 
-from corral import __version__, config, labels, ops, projects
+from corral import __version__, config, labels, ops, projects, tools
 from corral.config import Config, ConfigError
 from corral.herdr import Herdr, HerdrError, Workspace
 from corral.projects import AgentTab, Project, Tree
@@ -195,6 +195,14 @@ class CorralApp(App):
             self.action_settings()
         elif not self.cfg.path:
             self.notify("No settings file yet -- press , to set corral up", timeout=10)
+        if self.cfg.utility.enabled and (gone := tools.missing(self.cfg)):
+            names = " and ".join(f"{t.name} ({t.summary})" for t in gone)
+            verb = "isn't" if len(gone) == 1 else "aren't"
+            self.notify(
+                f"{names} {verb} installed, so the utility tab opens a plain shell "
+                "instead. To install, press , and open the Utility tab.",
+                timeout=12,
+            )
 
     # App bindings apply on every screen, so without this, `x` pressed in a
     # dialog or in Settings would act on the project list behind it.

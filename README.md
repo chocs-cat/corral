@@ -58,6 +58,24 @@ uv tool install corral-herdr
 ```
 
 This installs the `corral-herdr` package from PyPI into its own environment.
+
+### The utility tab's tools
+
+The default utility tab runs two programs corral doesn't bundle:
+[yazi](https://yazi-rs.github.io), a terminal file manager (browse, preview,
+open and rename the project's files), and
+[lazygit](https://github.com/jesseduffield/lazygit), a terminal UI for git
+(stage, commit, branch, rebase and push with single keys). A pane whose
+program isn't installed opens a plain shell. corral can install them for you,
+with Homebrew, pacman, or `go install` for lazygit:
+
+```sh
+corral tools            # what each does, and whether it's installed
+corral tools install    # install the missing ones
+```
+
+The TUI's settings screen (`,`, then the Utility tab) has an Install button for
+each, and the TUI mentions them at start-up when they're missing.
 It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 
 ## Use
@@ -108,7 +126,7 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 
 Press `,` in the TUI for the settings screen. Its tabs cover the project root
 (with a folder browser), the agent tabs a new workspace gets, the utility tab's
-three panes, the model matrix and effort levels, and a few advanced options.
+three panes and their sizes, the model matrix and effort levels, and a few advanced options.
 Saving writes the config file and keeps its comments and layout. If the root
 doesn't exist when the TUI starts, the settings screen opens so you can
 choose one.
@@ -132,6 +150,8 @@ default_agents = ["sonnet/medium"]
 top = "yazi"
 bottom_left = ""
 bottom_right = "lazygit"
+top_percent = 50                    # the top pane's share of the height
+bottom_left_percent = 35            # the bottom-left pane's share of the bottom row
 
 [efforts]
 claude = ["low", "medium", "high", "xhigh", "max"]

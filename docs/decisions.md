@@ -121,3 +121,12 @@ workspace lacked, and `--force-fill` (`F`), which also closed tabs that were
 neither the utility tab nor an agent tab, were removed and stay out. `up` on
 an existing workspace only focuses it; agent tabs are added with
 `corral tab` (the TUI's `a`).
+
+## yazi and lazygit: installed on request, not dependencies (2026-09)
+
+The default utility tab runs yazi and lazygit, but neither the package nor
+the Homebrew formula depends on them: a missing program's pane opens a plain
+shell. corral explains what each does and installs them when asked
+(`corral tools install`, or the settings screen's Install buttons), using the
+first of Homebrew, pacman or (lazygit only) `go install` that it finds. The
+installer runs in the user's terminal, so sudo and confirmation prompts work.

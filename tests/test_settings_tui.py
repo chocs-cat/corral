@@ -1,12 +1,13 @@
 """The settings screen, driven headlessly against the fake herdr."""
 
+import shutil
 import tomllib
 from pathlib import Path
 
 import pytest
-from textual.widgets import DataTable, Input, OptionList, Switch, TabbedContent
+from textual.widgets import Button, DataTable, Input, OptionList, Switch, TabbedContent
 
-from corral import config, ops
+from corral import config, ops, tools
 from corral.tui.app import AgentPicker, Confirm, CorralApp
 from corral.tui.settings import FolderPicker, ModelEditor, SettingsScreen, command_status
 
@@ -241,3 +242,78 @@ async def test_main_screen_keys_do_nothing_on_other_screens(app, herdr, root):
         await pilot.press("x", "s")
         await pilot.pause(0.3)
         assert isinstance(app.screen, AgentPicker)
+
+
+async def test_utility_sizes_are_saved_and_checked(app, cfg_path):
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        assert s.query_one("#util-bottom_left_percent", Input).value == "35"
+        s.query_one("#util-top_percent", Input).value = "95"
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert app.screen is s  # out of range: not saved
+        s.query_one("#util-top_percent", Input).value = "40"
+        s.query_one("#util-bottom_left_percent", Input).value = "30"
+        await pilot.pause(0.1)
+        diagram = str(s.query_one("#util-diagram").render())
+        assert "true 40%" in diagram
+        assert "shell 30%" in diagram
+        assert "true 70%" in diagram
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    u = saved(cfg_path)["utility"]
+    assert (u["top_percent"], u["bottom_left_percent"]) == (40, 30)
+
+
+@pytest.fixture
+def no_lazygit(monkeypatch):
+    """lazygit missing, Homebrew present; tools.install "installs" it."""
+    real = shutil.which
+    found = {"brew": "/bin/brew"}
+
+    def which(name, *a, **k):
+        if name in ("lazygit", "brew"):
+            return found.get(name)
+        return real(name, *a, **k)
+
+    def install(name, **kwargs):
+        found[name] = f"/bin/{name}"
+        return tools.InstallResult(name, "installed", ["brew", "install", name], f"/bin/{name}")
+
+    monkeypatch.setattr(shutil, "which", which)
+    monkeypatch.setattr(tools, "install", install)
+    return found
+
+
+async def test_install_a_missing_tool_from_settings(app, no_lazygit):
+    async with app.run_test(size=(160, 60)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        s.query_one("#util-bottom_right", Input).value = "lazygit"
+        await pilot.pause(0.1)
+        assert "install it below" in str(s.query_one("#util-bottom_right-status").render())
+        assert s.query_one("#tool-lazygit-install").has_class("hidden") is False
+        assert "brew install lazygit" in str(s.query_one("#tool-lazygit-status").render())
+        s.query_one("#tool-lazygit-install", Button).press()
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, Confirm)
+        await pilot.press("y")
+        await pilot.pause(0.5)
+        assert app.screen is s
+        assert "lazygit" in no_lazygit
+        assert "✓" in str(s.query_one("#util-bottom_right-status").render())
+        assert s.query_one("#tool-lazygit-install").has_class("hidden")
+
+
+async def test_start_notes_missing_utility_tools(herdr, tmp_path, root, monkeypatch, no_lazygit):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    p = tmp_path / "c.toml"
+    p.write_text(f'root = "{root}"\n[utility]\ntop = ""\n')
+    notes = []
+    monkeypatch.setattr(CorralApp, "notify", lambda self, msg, **kw: notes.append(msg))
+    app = CorralApp(config.load(p), herdr, config_path=p)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+    assert any("lazygit (a terminal UI for git) isn't installed" in n for n in notes)

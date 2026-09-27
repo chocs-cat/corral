@@ -8,14 +8,13 @@ and returns a result dataclass that the CLI prints or dumps as JSON.
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from corral import labels
+from corral import labels, tools
 from corral.config import Config, ConfigError
 from corral.herdr import Herdr, HerdrError, Snapshot
 from corral.projects import agent_tabs, find_workspace, label_for
@@ -119,38 +118,32 @@ def start_agent(
 # --- building blocks ----------------------------------------------------------
 
 
-def _command_ok(cmd: str) -> bool:
-    try:
-        first = shlex.split(cmd)[0]
-    except (ValueError, IndexError):
-        return False
-    return shutil.which(first) is not None
-
-
 def build_utility_tab(
     h: Herdr, cfg: Config, tab: str, root_pane: str, cwd: str, label: str, report: Report
 ) -> str:
-    """Turn a tab's single pane into top / bottom-left / bottom-right, label
-    it, and leave its focus on the bottom-left pane (returned)."""
+    """Turn a tab's single pane into top / bottom-left / bottom-right, sized
+    by the config's percentages, label it, and leave its focus on the
+    bottom-left pane (returned)."""
     u = cfg.utility
     h.rename_tab(tab, label)
-    bottom_left = h.split(root_pane, "down", cwd, focus=True)
-    bottom_right = h.split(bottom_left, "right", cwd, focus=False)
-    for pane, cmd in (
-        (root_pane, u.top),
-        (bottom_left, u.bottom_left),
-        (bottom_right, u.bottom_right),
-    ):
+    # herdr's --ratio is the share the split pane keeps: the top, then the left.
+    bottom_left = h.split(root_pane, "down", cwd, focus=True, ratio=u.top_percent / 100)
+    bottom_right = h.split(
+        bottom_left, "right", cwd, focus=False, ratio=u.bottom_left_percent / 100
+    )
+    for pane, cmd in zip((root_pane, bottom_left, bottom_right), u.panes().values(), strict=True):
         if not cmd:
             continue
-        if not _command_ok(cmd):
-            report(f"  skip   {cmd} — not installed (plain shell instead)", error=True)
+        prog = tools.program(cmd)
+        if not prog or not shutil.which(prog):
+            hint = f"; corral tools install {prog}" if prog and tools.known(prog) else ""
+            report(f"  skip   {cmd} — not installed (plain shell instead{hint})", error=True)
             continue
         try:
             h.pane_run(pane, cmd)
         except HerdrError as e:
             report(f"  warn   {cmd} failed to launch: {e.message}", error=True)
-    parts = " / ".join(c or "shell" for c in (u.top, u.bottom_left, u.bottom_right))
+    parts = " / ".join(c or "shell" for c in u.panes().values())
     report(f"  added  {label} ({parts})")
     return bottom_left
 

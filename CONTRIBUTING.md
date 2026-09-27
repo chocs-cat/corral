@@ -18,6 +18,7 @@ The code is laid out in layers, each depending only on the ones above it:
 | `config.py` | XDG TOML config over built-in defaults; `save` writes it back, keeping comments (tomlkit) |
 | `labels.py` | `Model•effort[-N]` tab labels and agent names |
 | `projects.py` | scanning the root, workspace matching |
+| `tools.py` | the utility tab's programs (yazi, lazygit): status and installing them |
 | `ops.py` | the operations: `up`, `tab`, `stop`, `close` |
 | `cli.py` | argparse front end, human and `--json` output |
 | `tui/app.py` | the Textual app; calls `ops` in worker threads |

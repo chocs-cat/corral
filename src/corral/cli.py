@@ -7,6 +7,7 @@
     corral close WS... ...      close whole workspaces
     corral ls ...               projects, their workspaces and agents
     corral models               the model matrix
+    corral tools [install]      the utility tab's programs; install yazi/lazygit
     corral config path|init|show
 
 Every command takes --json: the result goes to stdout as JSON and progress
@@ -20,12 +21,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from corral import __version__, config, labels, ops, projects
+from corral import __version__, config, labels, ops, projects, tools
 from corral.config import Config, ConfigError
 from corral.herdr import Herdr, HerdrError
 
@@ -241,6 +243,57 @@ def cmd_models(ctx: Ctx) -> int:
     return EXIT_OK
 
 
+PANE_NAMES = {"top": "top", "bottom_left": "bottom-left", "bottom_right": "bottom-right"}
+
+
+def cmd_tools(ctx: Ctx) -> int:
+    rows = tools.status(ctx.cfg)
+    if ctx.json:
+        print(json.dumps({"tools": _plain(rows)}, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    for t in rows:
+        print(f"{t.name} — {t.summary}: {t.detail}" if t.summary else t.name)
+        facts = [f"installed: {config.tilde(Path(t.path))}" if t.path else "not installed"]
+        if t.panes:
+            facts.append("runs in the " + ", ".join(PANE_NAMES[p] for p in t.panes) + " pane")
+        elif t.summary:
+            facts.append("not used by the utility tab")
+        if not t.installed and t.install:
+            facts.append(f"install: corral tools install {t.name}  ({shlex.join(t.install)})")
+        elif not t.installed and t.homepage:
+            facts.append(f"see {t.homepage}")
+        print("  " + " · ".join(facts))
+    return EXIT_OK
+
+
+def cmd_tools_install(ctx: Ctx) -> int:
+    a = ctx.args
+    names = a.name or [t.name for t in tools.missing(ctx.cfg)]
+    if not names:
+        ctx.report("nothing to install: the utility tab's programs are all installed")
+    results = []
+    for name in names:
+        plan = tools.install(name, dry_run=True)
+        if plan.action == "planned" and not a.dry_run:
+            ctx.report(f"install {name}: {shlex.join(plan.command or [])}")
+            res = tools.install(name, stdout=sys.stderr if ctx.json else None)
+        else:
+            res = plan
+        results.append(res)
+        if res.action == "installed":
+            ctx.report(f"  installed {name} ({res.path})")
+        elif res.action == "have":
+            ctx.report(f"  have   {name} ({res.path})")
+        elif res.action == "planned":
+            ctx.report(f"  would run  {shlex.join(res.command or [])}")
+        else:
+            ctx.report(f"  FAILED {name} — {res.error}", error=True)
+    ctx.emit(results)
+    if any(r.action == "unknown" for r in results):
+        return EXIT_USAGE
+    return EXIT_OK if all(r.ok for r in results) else EXIT_FAILED
+
+
 def cmd_config(ctx: Ctx) -> int:
     a = ctx.args
     path = Path(a.config).expanduser() if a.config else config.config_path()
@@ -393,6 +446,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     md = sub.add_parser("models", parents=[common], help="print the model matrix")
     md.set_defaults(func=cmd_models)
+
+    tl = sub.add_parser(
+        "tools",
+        parents=[common],
+        help="the utility tab's programs: what they do, whether they're installed",
+        description="List the programs the utility tab runs -- yazi (a terminal file "
+        "manager) and lazygit (a terminal UI for git) by default -- with what each does "
+        "and whether it's installed. `corral tools install` installs the missing ones.",
+    )
+    tl.set_defaults(func=cmd_tools)
+    tl_sub = tl.add_subparsers(dest="tools_command", metavar="COMMAND")
+    ti = tl_sub.add_parser(
+        "install",
+        parents=[common],
+        help="install yazi and/or lazygit",
+        description="Install tools with the first package manager found (Homebrew, "
+        "pacman, or go for lazygit). With no names, installs the ones the utility tab "
+        "runs that are missing.",
+    )
+    ti.add_argument("name", nargs="*", help="yazi, lazygit (default: the missing ones)")
+    ti.add_argument("-n", "--dry-run", action="store_true", help="print the commands only")
+    ti.set_defaults(func=cmd_tools_install)
 
     cf = sub.add_parser("config", parents=[common], help="config file: path, init, show")
     cf.add_argument("action", choices=["path", "init", "show"])

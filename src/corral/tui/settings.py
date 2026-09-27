@@ -12,7 +12,7 @@ from pathlib import Path
 
 from rich.text import Text
 from textual import on, work
-from textual.app import ComposeResult
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
@@ -33,12 +33,21 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from corral import config, labels, ops, projects
-from corral.config import DEFAULT_PRUNE, Config, ConfigError, ModelSpec, Utility
+from corral import config, labels, ops, projects, tools
+from corral.config import (
+    DEFAULT_PRUNE,
+    PERCENT_MAX,
+    PERCENT_MIN,
+    Config,
+    ConfigError,
+    ModelSpec,
+    Utility,
+)
 from corral.herdr import AGENT_KINDS
 from corral.tui.dialogs import AgentPicker, Confirm
 
 UTILITY_PANES = (("top", "Top"), ("bottom_left", "Bottom left"), ("bottom_right", "Bottom right"))
+UTILITY_SIZES = (("top_percent", "Top height"), ("bottom_left_percent", "Bottom-left width"))
 
 
 def _split_list(text: str) -> list[str]:
@@ -71,14 +80,60 @@ def command_status(cmd: str) -> Text:
     on PATH, or a shell because the program is missing."""
     if not cmd.strip():
         return Text("plain shell", style="dim")
-    try:
-        prog = shlex.split(cmd)[0]
-    except (ValueError, IndexError):
+    prog = tools.program(cmd)
+    if not prog:
         return Text("✗ can't parse this command", style="red")
+    tool = tools.known(prog)
     found = shutil.which(prog)
     if found:
-        return Text(f"✓ {config.tilde(Path(found))}", style="green")
-    return Text(f"✗ {prog} is not installed -- a plain shell instead", style="yellow")
+        return Text.assemble(
+            (f"✓ {config.tilde(Path(found))}", "green"),
+            (f"  ({tool.summary})" if tool else "", "dim"),
+        )
+    return Text.assemble(
+        (f"✗ {prog} is not installed -- a plain shell instead", "yellow"),
+        (" (install it below)", "yellow") if tool else "",
+    )
+
+
+def utility_diagram(
+    names: tuple[str, str, str], top_percent: int, left_percent: int, w: int = 44, h: int = 6
+) -> str:
+    """The utility tab's panes, drawn roughly to scale."""
+    top, left, right = names
+    th = min(h - 1, max(1, round(h * top_percent / 100)))
+    lw = min(w - 2, max(1, round((w - 1) * left_percent / 100)))
+    rw = w - 1 - lw
+    top_text = f"{top} {top_percent}%"
+    left_text = f"{left} {left_percent}%"
+    right_text = f"{right} {100 - left_percent}%"
+
+    def cell(text: str, width: int, show: bool) -> str:
+        return (text[:width] if show else "").center(width)
+
+    lines: list[str] = ["┌" + "─" * w + "┐"]
+    lines += [f"│{cell(top_text, w, i == (th - 1) // 2)}│" for i in range(th)]
+    lines.append("├" + "─" * lw + "┬" + "─" * rw + "┤")
+    bh = h - th
+    for i in range(bh):
+        mid = i == (bh - 1) // 2
+        lines.append(f"│{cell(left_text, lw, mid)}│{cell(right_text, rw, mid)}│")
+    lines.append("└" + "─" * lw + "┴" + "─" * rw + "┘")
+    return "\n".join(lines)
+
+
+def tool_status(name: str) -> Text:
+    st = tools.status_of(name)
+    if st.path:
+        return Text(f"✓ installed: {config.tilde(Path(st.path))}", style="green")
+    if st.install:
+        return Text.assemble(
+            ("✗ not installed", "yellow"), (f"  Install runs: {shlex.join(st.install)}", "dim")
+        )
+    return Text.assemble(
+        ("✗ not installed", "yellow"),
+        (f"  no Homebrew here: see {st.homepage}", "dim"),
+    )
 
 
 class PathSuggester(Suggester):
@@ -325,6 +380,16 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .buttons { height: auto; margin-top: 1; }
     SettingsScreen .buttons > Button { margin-right: 1; }
     SettingsScreen #util-diagram { margin-left: 18; margin-top: 1; color: $text-muted; }
+    SettingsScreen TabPane { overflow-y: auto; }
+    SettingsScreen .row > Input.percent { width: 8; }
+    SettingsScreen .row > Label.unit { padding: 1 3 0 1; }
+    SettingsScreen .tool { height: auto; margin-bottom: 1; }
+    SettingsScreen .tool > Label.field { width: 18; text-style: bold; }
+    SettingsScreen .tool > Vertical { height: auto; }
+    SettingsScreen .tool-row { height: auto; }
+    SettingsScreen .tool-row > Static { width: auto; padding-top: 1; }
+    SettingsScreen .tool-row > Button { margin-left: 2; }
+    SettingsScreen .tool-row > Button.hidden { display: none; }
     SettingsScreen #bottom { height: auto; padding: 0 1; border-top: solid $panel; }
     SettingsScreen #file { width: 1fr; padding-top: 1; color: $text-muted; }
     SettingsScreen #bottom Button { margin-left: 1; }
@@ -411,7 +476,41 @@ class SettingsScreen(Screen[Config | None]):
                             id=f"util-{key}",
                         )
                     yield Static(id=f"util-{key}-status", classes="status")
+                with Horizontal(classes="row"):
+                    yield Label("Sizes", classes="field")
+                    for key, title in UTILITY_SIZES:
+                        yield Input(
+                            str(getattr(c.utility, key)),
+                            type="integer",
+                            id=f"util-{key}",
+                            classes="percent",
+                        )
+                        yield Label(f"% {title.lower()}", classes="unit")
+                yield Static(
+                    "the top pane's share of the tab's height, and the bottom-left pane's "
+                    "share of the row below it",
+                    classes="hint",
+                )
                 yield Static(id="util-diagram")
+                yield Static("Tools corral can install", classes="section")
+                yield Static(
+                    "The default utility tab runs these two. A pane whose program isn't "
+                    "installed opens a plain shell instead.",
+                    classes="note",
+                )
+                for tool in tools.TOOLS:
+                    with Horizontal(classes="tool"):
+                        yield Label(tool.name, classes="field")
+                        with Vertical():
+                            yield Static(f"{tool.summary}: {tool.detail}")
+                            with Horizontal(classes="tool-row"):
+                                yield Static(id=f"tool-{tool.name}-status")
+                                yield Button(
+                                    f"Install {tool.name}",
+                                    id=f"tool-{tool.name}-install",
+                                    name=tool.name,
+                                    classes="tool-install",
+                                )
             with TabPane("Models", id="tab-models"):
                 yield Static(
                     "The models you can open agent tabs with. Tabs are named "
@@ -471,6 +570,7 @@ class SettingsScreen(Screen[Config | None]):
         self.render_agents()
         for key, _ in UTILITY_PANES:
             self.update_util_status(key)
+        self.update_tools()
         self.util_toggled()
         self.scan_root()
         self.baseline = config.to_data(self.collect())
@@ -595,12 +695,25 @@ class SettingsScreen(Screen[Config | None]):
         self.update_util_status(event.input.id.removeprefix("util-"))
         self.update_util_diagram()
 
+    @on(Input.Changed, "#util-top_percent")
+    @on(Input.Changed, "#util-bottom_left_percent")
+    def util_size_changed(self) -> None:
+        self.update_util_diagram()
+
     @on(Switch.Changed, "#util-enabled")
     def util_toggled(self) -> None:
         on_ = self.query_one("#util-enabled", Switch).value
-        for key, _ in UTILITY_PANES:
+        for key, _ in UTILITY_PANES + UTILITY_SIZES:
             self.query_one(f"#util-{key}", Input).disabled = not on_
         self.update_util_diagram()
+
+    def util_percent(self, key: str) -> int | None:
+        """A size input's value, or None if it isn't a whole number in range."""
+        try:
+            v = int(self.query_one(f"#util-{key}", Input).value)
+        except ValueError:
+            return None
+        return v if PERCENT_MIN <= v <= PERCENT_MAX else None
 
     def update_util_status(self, key: str) -> None:
         cmd = self.query_one(f"#util-{key}", Input).value
@@ -612,18 +725,64 @@ class SettingsScreen(Screen[Config | None]):
             diagram.update("no utility tab: a workspace starts with its agent tabs")
             return
         top, left, right = (
-            (self.query_one(f"#util-{k}", Input).value.strip() or "shell")[:20]
+            tools.program(self.query_one(f"#util-{k}", Input).value) or "shell"
             for k, _ in UTILITY_PANES
         )
-        w = 44
-        half = w // 2 - 1
+        u = self.orig.utility
         diagram.update(
-            "┌" + "─" * w + "┐\n"
-            f"│{top:^{w}}│\n"
-            "├" + "─" * half + "┬" + "─" * (w - half - 1) + "┤\n"
-            f"│{left:^{half}}│{right:^{w - half - 1}}│\n"
-            "└" + "─" * half + "┴" + "─" * (w - half - 1) + "┘"
+            utility_diagram(
+                (top, left, right),
+                self.util_percent("top_percent") or u.top_percent,
+                self.util_percent("bottom_left_percent") or u.bottom_left_percent,
+            )
         )
+
+    def update_tools(self) -> None:
+        for tool in tools.TOOLS:
+            self.query_one(f"#tool-{tool.name}-status", Static).update(tool_status(tool.name))
+            st = tools.status_of(tool.name)
+            button = self.query_one(f"#tool-{tool.name}-install", Button)
+            button.set_class(st.installed or not st.install, "hidden")
+
+    @on(Button.Pressed, ".tool-install")
+    @work(exclusive=True, group="settings-install")
+    async def install_tool(self, event: Button.Pressed) -> None:
+        name = event.button.name or ""
+        tool, st = tools.known(name), tools.status_of(name)
+        if not tool or st.installed or not st.install:
+            self.update_tools()
+            return
+        command = shlex.join(st.install)
+        if not await self.app.push_screen_wait(
+            Confirm(
+                f"Install {name}?",
+                f"{name} is {tool.summary}: {tool.detail}.\n\n"
+                f"corral will run\n\n    {command}\n\n"
+                "in this terminal, then come back here.",
+            )
+        ):
+            return
+        res = await self.run_install(name)
+        self.update_tools()
+        for key, _ in UTILITY_PANES:
+            self.update_util_status(key)
+        if res.action == "installed":
+            self.notify(f"{name} installed: {config.tilde(Path(res.path or ''))}")
+        elif res.action != "have":
+            self.notify(res.error, title=f"{name} was not installed", severity="error", timeout=10)
+
+    async def run_install(self, name: str) -> tools.InstallResult:
+        """Hand the terminal to the installer (it may ask for a password or
+        a confirmation); where the app can't suspend, run it in the background."""
+        try:
+            with self.app.suspend():
+                print(f"corral: installing {name}\n", flush=True)
+                res = tools.install(name)
+                if res.action == "failed":
+                    input(f"\n{res.error}\nPress Enter to go back to corral. ")
+                return res
+        except SuspendNotSupported:
+            return await asyncio.to_thread(tools.install, name, capture=True)
 
     # models
 
@@ -749,6 +908,11 @@ class SettingsScreen(Screen[Config | None]):
         refresh = number("refresh", "refresh interval")
         if not 0.5 <= refresh <= 3600:
             raise ConfigError("refresh interval: use 0.5 to 3600 seconds")
+        sizes: dict[str, int] = {}
+        for key, title in UTILITY_SIZES:
+            sizes[key] = number(f"util-{key}", title.lower(), int)
+            if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
+                raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
         self.save_effort_rows()
         used = {m.tool for m in self.models}
         efforts = {
@@ -765,7 +929,11 @@ class SettingsScreen(Screen[Config | None]):
             agent_timeout_ms=int(timeout * 1000),
             utility=Utility(
                 enabled=self.query_one("#util-enabled", Switch).value,
-                **{k: self.query_one(f"#util-{k}", Input).value.strip() for k, _ in UTILITY_PANES},
+                top=self.query_one("#util-top", Input).value.strip(),
+                bottom_left=self.query_one("#util-bottom_left", Input).value.strip(),
+                bottom_right=self.query_one("#util-bottom_right", Input).value.strip(),
+                top_percent=sizes["top_percent"],
+                bottom_left_percent=sizes["bottom_left_percent"],
             ),
             models=tuple(self.models),
             efforts=efforts,
