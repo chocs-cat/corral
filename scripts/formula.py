@@ -4,13 +4,15 @@
 # ///
 """Write corral's Homebrew formula for a version published on PyPI.
 
-    git switch --detach v0.5.1
-    uv run --script scripts/formula.py 0.5.1 > Formula/corral-herdr.rb
+    git worktree add --detach ../corral-v0.5.1 v0.5.1
+    uv run --script scripts/formula.py 0.5.1 --root ../corral-v0.5.1 > corral-herdr.rb
 
 The formula builds from the PyPI sdist, with a `resource` for each runtime
 dependency at the version `uv.lock` pins, so Homebrew installs what CI tested.
-Run it from a checkout of the release's tag: it reads the lock from the working
-tree and refuses when `pyproject.toml` has another version. Each pin's sdist URL
+`--root` is a checkout of the release's tag (default: the checkout this script
+is in): the lock comes from there, and the script refuses when its
+`pyproject.toml` has another version. The template is this script's own, so a
+fix to it applies when an older version's formula is redone. Each pin's sdist URL
 and hash come from PyPI. A dependency whose markers hold on neither macOS nor
 Linux is left out. Unlike `brew update-python-resources`, this doesn't skip
 uploads under a day old, so it works right after a release. The release
@@ -164,13 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("version", help="a version of corral-herdr published on PyPI")
     parser.add_argument("--python", default=PYTHON, help=f"the formula's Python (default {PYTHON})")
     parser.add_argument("--wait", type=float, default=0, help="seconds to wait for PyPI")
+    parser.add_argument(
+        "--root", type=Path, default=ROOT, help="a checkout of the release's tag (default: this)"
+    )
     args = parser.parse_args(argv)
 
-    if (here := checkout_version()) != args.version:
-        raise SystemExit(f"formula.py: this checkout is {here}; check out v{args.version} first")
+    if (here := checkout_version(args.root)) != args.version:
+        raise SystemExit(f"formula.py: {args.root} is {here}, not {args.version}")
     package = sdist(PACKAGE, args.version, wait=args.wait)
     resources = []
-    for req in pins():
+    for req in pins(args.root):
         if not needed(req, args.python):
             continue
         (spec,) = req.specifier

@@ -27,14 +27,19 @@ jobs:
   tap:
     runs-on: ubuntu-latest
     steps:
-      # The resources come from the release's uv.lock, so check out its tag.
+      # The script from this workflow's commit; the resources from the
+      # release's uv.lock, so its tag goes alongside.
+      - uses: actions/checkout@v7
       - uses: actions/checkout@v7
         with:
           ref: v${{ inputs.version }}
+          path: release
       - uses: astral-sh/setup-uv@v7
       - name: Write the formula
         # PyPI can take a little while to serve a new upload.
-        run: uv run --script scripts/formula.py "$VERSION" --wait 600 > "$RUNNER_TEMP/corral-herdr.rb"
+        run: >-
+          uv run --script scripts/formula.py "$VERSION" --root release --wait 600
+          > "$RUNNER_TEMP/corral-herdr.rb"
         env:
           VERSION: ${{ inputs.version }}
       - uses: actions/checkout@v7

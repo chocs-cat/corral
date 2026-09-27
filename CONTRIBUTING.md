@@ -100,5 +100,6 @@ The formula is `Formula/corral-herdr.rb` in
 `scripts/formula.py`: don't edit it in the tap, change the script's template.
 It builds from the PyPI sdist, with a `resource` for each runtime dependency
 at the version the release's `uv.lock` pins. To redo a version's formula, run
-the **Formula** workflow by hand with that version, or locally from a checkout
-of its tag: `uv run --script scripts/formula.py X.Y.Z > corral-herdr.rb`.
+the **Formula** workflow by hand with that version. Locally, point `--root` at
+a checkout of its tag, which the lock comes from:
+`uv run --script scripts/formula.py X.Y.Z --root ../corral-vX.Y.Z > corral-herdr.rb`.
