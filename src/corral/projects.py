@@ -5,7 +5,7 @@ to `scan_depth` levels below one and the plain folders that lead to them. The
 home directory is a project too, labelled "~" and listed first.
 
 A project's workspace label is its path relative to the root ("courses",
-"cruzainet/api"); the home directory is "~" and any other directory outside
+"shop/api"); the home directory is "~" and any other directory outside
 the root uses its basename. An existing
 workspace also matches a nested project when it carries the bare basename
 and one of its panes sits in that directory -- so a workspace made before

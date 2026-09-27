@@ -22,21 +22,21 @@ async def test_tree_folds_and_open_builds_nested_workspace(herdr, cfg):
     app = CorralApp(cfg, herdr)
     async with app.run_test(size=(150, 40)) as pilot:
         await settle(pilot, app)
-        assert rows(app)[:4] == ["~", "Archive", "courses", "cruzainet"]
-        app.move_to("cruzainet")
+        assert rows(app) == ["~", "Archive", "courses", "cSolveWordle", "MCPs", "scratch", "shop"]
+        app.move_to("shop")
         await pilot.press("right")
-        assert "cruzainet/api" in rows(app)
+        assert "shop/api" in rows(app)
         await pilot.press("right")  # step into the first child
-        assert app.current_rel() == "cruzainet/api"
+        assert app.current_rel() == "shop/api"
         await pilot.press("o")
         await settle(pilot, app)
-        assert [w["label"] for w in herdr.ws.values()] == ["cruzainet/api"]
-        assert app.st("cruzainet/api").ws is not None
+        assert [w["label"] for w in herdr.ws.values()] == ["shop/api"]
+        assert app.st("shop/api").ws is not None
         await pilot.press("left")  # to the parent
         await pilot.press("left")  # fold it
-        assert "cruzainet/api" not in rows(app)
+        assert "shop/api" not in rows(app)
         await pilot.press("space")  # space toggles the fold
-        assert "cruzainet/api" in rows(app)
+        assert "shop/api" in rows(app)
 
 
 async def test_header_stays_one_line_and_uses_bullet(herdr, cfg):
@@ -103,9 +103,9 @@ async def test_filter_keeps_ancestors(herdr, cfg):
     app = CorralApp(cfg, herdr)
     async with app.run_test(size=(150, 40)) as pilot:
         await settle(pilot, app)
-        await pilot.press("slash", *"ayeai", "enter")
+        await pilot.press("slash", *"game", "enter")
         await pilot.pause(0.2)
-        assert rows(app) == ["Archive", "Archive/AyeAI", "Archive/AyeAI/ayeai-api"]
+        assert rows(app) == ["Archive", "Archive/2024", "Archive/2024/game-jam"]
         await pilot.press("escape")
         await pilot.pause(0.2)
         assert "courses" in rows(app)
