@@ -1,7 +1,7 @@
 # Working on corral
 
-Instructions for coding agents (Codex reads this file; so does Claude Code,
-directly or through an `@AGENTS.md` import). Humans: see CONTRIBUTING.md.
+Instructions for coding agents (Codex reads this file; Claude Code reads it
+through `CLAUDE.md`'s `@AGENTS.md` import). Humans: see CONTRIBUTING.md.
 
 corral builds [herdr](https://herdr.dev) workspaces for the projects under a
 root directory, from a Textual TUI and an argparse CLI with `--json` on every
