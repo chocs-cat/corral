@@ -72,3 +72,20 @@ def test_option_after_the_command_wins(run, root, tmp_path, capsys):
     other.mkdir()
     assert run("--root", str(root), "ls", "--json", "--root", str(other)) == 0
     assert json.loads(capsys.readouterr().out)["root"] == str(other)
+
+
+def test_tools_json_and_install_dry_run(run, capsys, monkeypatch):
+    from corral import tools
+
+    monkeypatch.setattr(tools.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
+    assert run("tools", "--json") == 0
+    out = json.loads(capsys.readouterr().out)
+    lazygit = next(t for t in out["tools"] if t["name"] == "lazygit")
+    assert lazygit["path"] is None
+    assert lazygit["panes"] == ["bottom_right"]
+    assert lazygit["install"] == ["brew", "install", "lazygit"]
+
+    assert run("tools", "install", "--dry-run", "--json") == 0
+    out = json.loads(capsys.readouterr().out)
+    assert [(r["name"], r["action"]) for r in out] == [("yazi", "planned"), ("lazygit", "planned")]
+    assert run("tools", "install", "nano") == cli.EXIT_USAGE

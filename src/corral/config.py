@@ -69,15 +69,26 @@ DEFAULT_MODELS = (
 )
 
 
+PERCENT_MIN, PERCENT_MAX = 10, 90
+
+
 @dataclass(frozen=True)
 class Utility:
     """The utility tab: one pane on top, two below. Each is a command to run,
-    or "" for a plain shell. Missing commands degrade to a shell."""
+    or "" for a plain shell. Missing commands degrade to a shell. The sizes
+    are percentages: the top pane's share of the tab's height, and the
+    bottom-left pane's share of the bottom row's width."""
 
     enabled: bool = True
     top: str = "yazi"
     bottom_left: str = ""
     bottom_right: str = "lazygit"
+    top_percent: int = 50
+    bottom_left_percent: int = 35
+
+    def panes(self) -> dict[str, str]:
+        """Pane name -> command, top first."""
+        return {"top": self.top, "bottom_left": self.bottom_left, "bottom_right": self.bottom_right}
 
 
 @dataclass
@@ -152,6 +163,15 @@ def _expect(data: dict, key: str, kind: type | tuple[type, ...], where: str = ""
     return v
 
 
+def _percent(table: dict, key: str, default: int) -> int:
+    if key not in table:
+        return default
+    v = table[key]
+    if isinstance(v, bool) or not isinstance(v, int) or not PERCENT_MIN <= v <= PERCENT_MAX:
+        raise ConfigError(f"utility.{key}: expected a whole number, {PERCENT_MIN} to {PERCENT_MAX}")
+    return v
+
+
 def from_dict(data: dict) -> Config:
     cfg = Config()
     if "root" in data:
@@ -177,6 +197,8 @@ def from_dict(data: dict) -> Config:
             top=str(u.get("top", base.top)),
             bottom_left=str(u.get("bottom_left", base.bottom_left)),
             bottom_right=str(u.get("bottom_right", base.bottom_right)),
+            top_percent=_percent(u, "top_percent", base.top_percent),
+            bottom_left_percent=_percent(u, "bottom_left_percent", base.bottom_left_percent),
         )
 
     if "models" in data:
@@ -244,6 +266,8 @@ def to_data(cfg: Config) -> dict:
             "top": u.top,
             "bottom_left": u.bottom_left,
             "bottom_right": u.bottom_right,
+            "top_percent": u.top_percent,
+            "bottom_left_percent": u.bottom_left_percent,
         },
         "efforts": {tool: list(levels) for tool, levels in cfg.efforts.items()},
         "models": [
@@ -356,12 +380,18 @@ refresh_seconds = 3.0
 agent_timeout_ms = 60000
 
 # The utility tab: a pane on top, two below. Each value is a command, or ""
-# for a plain shell. A command that isn't installed falls back to a shell.
+# for a plain shell. A command that isn't installed falls back to a shell;
+# `corral tools` shows what's missing and `corral tools install` installs
+# yazi (a terminal file manager) and lazygit (a terminal UI for git).
+# top_percent is the top pane's share of the tab's height, and
+# bottom_left_percent the bottom-left pane's share of the bottom row (10-90).
 [utility]
 enabled = true
 top = "yazi"
 bottom_left = ""
 bottom_right = "lazygit"
+top_percent = 50
+bottom_left_percent = 35
 
 # Effort levels offered per agent tool (herdr agent kind).
 [efforts]

@@ -1,3 +1,6 @@
+import shutil
+from dataclasses import replace
+
 import pytest
 
 from corral import ops
@@ -20,6 +23,28 @@ def test_up_builds_utility_and_default_agent(herdr, cfg, root):
     start = next(c for c in herdr.calls if c[0] == "agent_start")
     assert start[1:3] == ("claude-sonnet-medium", "claude")
     assert start[4] == ("--model", "sonnet", "--effort", "medium")
+
+
+def test_utility_tab_splits_by_the_configured_sizes(herdr, cfg, root):
+    ops.up(herdr, cfg, root / "courses", no_agent=True)
+    splits = [c[2:] for c in herdr.calls if c[0] == "split"]
+    assert splits == [("down", 0.5), ("right", 0.35)]  # shell 35%, lazygit 65%
+
+    herdr.calls.clear()
+    sized = replace(cfg, utility=replace(cfg.utility, top_percent=30, bottom_left_percent=70))
+    ops.up(herdr, sized, root / "shop", no_agent=True)
+    assert [c[2:] for c in herdr.calls if c[0] == "split"] == [("down", 0.3), ("right", 0.7)]
+
+
+def test_missing_utility_program_suggests_installing_it(herdr, cfg, root, monkeypatch):
+    real = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None if n == "lazygit" else real(n))
+    u = replace(cfg.utility, bottom_right="lazygit", top="no-such-program-zz")
+    lines = []
+    ops.up(herdr, replace(cfg, utility=u), root / "courses", no_agent=True,
+           report=lambda line, error=False: lines.append(line))  # fmt: skip
+    assert any("lazygit" in ln and "corral tools install lazygit" in ln for ln in lines)
+    assert any("no-such-program-zz" in ln and "tools install" not in ln for ln in lines)
 
 
 def test_up_home_is_labelled_tilde(herdr, cfg, home):

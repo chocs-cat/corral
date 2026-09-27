@@ -32,6 +32,7 @@ def test_default_toml_round_trips(tmp_path, monkeypatch):
     assert cfg.path == f
     assert [m.key for m in cfg.models] == ["sonnet", "opus", "haiku", "codex"]
     assert cfg.utility.top == "yazi"
+    assert (cfg.utility.top_percent, cfg.utility.bottom_left_percent) == (50, 35)
 
 
 def test_file_values_and_root_precedence(tmp_path, monkeypatch):
@@ -80,3 +81,15 @@ def test_bad_config(tmp_path, body, msg):
     f.write_text(body)
     with pytest.raises(ConfigError, match=msg):
         config.load(f)
+
+
+def test_utility_sizes(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text("[utility]\ntop_percent = 40\nbottom_left_percent = 60\n")
+    u = config.load_file(f).utility
+    assert (u.top_percent, u.bottom_left_percent) == (40, 60)
+    assert u.bottom_right == "lazygit"  # unset keys keep their defaults
+    for bad in ("5", "95", "true", '"50"', "50.0"):
+        f.write_text(f"[utility]\ntop_percent = {bad}\n")
+        with pytest.raises(ConfigError, match="top_percent"):
+            config.load_file(f)
