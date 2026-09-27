@@ -65,6 +65,16 @@ so existing workspaces keep matching.
 Declaring `depends_on "herdr"` would make `brew install` upgrade a running
 herdr. The formula says to install herdr in its caveats instead.
 
+## The release writes the Homebrew formula (2026-09)
+
+After publishing, the release workflow generates the formula with
+`scripts/formula.py` and pushes it to `chocs-cat/homebrew-tap` with the
+organization's `TAP_TOKEN`, as tack's release does, rather than having the
+tap poll PyPI. The resources are the release's `uv.lock` pins, so Homebrew
+installs what CI tested, not whatever newer versions PyPI has; and the script
+reads PyPI directly, since `brew update-python-resources` skips uploads under
+a day old.
+
 ## Tests use a fake herdr; live runs touch only their own workspaces (2026-09)
 
 Behaviour tests run against the in-memory `tests/fake_herdr.py`; the real

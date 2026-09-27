@@ -4,7 +4,8 @@ name: Release
 # CHANGELOG.md from conventional commits. Merging it tags vX.Y.Z and creates
 # the GitHub release; the publish job then builds and uploads to PyPI via
 # trusted publishing (no token -- configure the `pypi` environment and the
-# PyPI trusted publisher once, see CONTRIBUTING.md).
+# PyPI trusted publisher once, see CONTRIBUTING.md), and the formula job
+# updates the Homebrew tap.
 
 on:
   push:
@@ -20,6 +21,7 @@ jobs:
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
@@ -52,3 +54,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*
+
+  formula:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/formula.yml
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+    secrets: inherit
