@@ -323,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="build or focus a project workspace",
         description="Build a project workspace (utility tab + agent tabs), or "
         "focus it if it exists. The label defaults to the path "
-        "relative to the root (cruzainet/api), else the basename.",
+        "relative to the root (shop/api), else the basename.",
     )
     up.add_argument("dir", nargs="?", help="project directory (default: current)")
     up.add_argument("--label", help="workspace label")

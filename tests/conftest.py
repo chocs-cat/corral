@@ -26,11 +26,11 @@ def root(tmp_path: Path) -> Path:
         (d / ".git" / "HEAD").write_text(f"ref: refs/heads/{branch}\n")
 
     repo("courses")
-    repo("cruzainet", "master")
-    repo("cruzainet/api", "develop")
-    repo("cruzainet/web-app")
-    (r / "cruzainet" / "notes").mkdir()  # plain dir: not listed
-    repo("Archive/AyeAI/ayeai-api")
+    repo("shop", "master")
+    repo("shop/api", "develop")
+    repo("shop/web-app")
+    (r / "shop" / "notes").mkdir()  # plain dir: not listed
+    repo("Archive/2024/game-jam")
     repo("MCPs/gandi-mcp")
     repo("cSolveWordle")
     repo("cSolveWordle/.claude/worktrees/x")  # hidden: skipped

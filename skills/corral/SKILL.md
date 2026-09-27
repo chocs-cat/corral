@@ -13,7 +13,7 @@ A corral workspace has one shape:
 
 | Tab | Label | Contents |
 |---|---|---|
-| utility | the project label (`courses`, `cruzainet/api`) | configurable panes; by default yazi on top, a shell bottom-left, lazygit bottom-right |
+| utility | the project label (`courses`, `shop/api`) | configurable panes; by default yazi on top, a shell bottom-left, lazygit bottom-right |
 | agent tabs | `<Model>•<effort>` (`Sonnet•medium`, `Opus•high`) | one interactive agent each |
 
 A second tab of the same model and effort is `Sonnet•medium-2`, then `-3`.
@@ -39,7 +39,7 @@ or `exited` for an agent tab whose agent has gone. `other_workspaces` lists
 workspaces that belong to no project under the root.
 
 Project labels are paths relative to the root: a nested repo is
-`cruzainet/api`. The home directory is always a project, listed first and
+`shop/api`. The home directory is always a project, listed first and
 labelled `~` (`corral up ~`; quote the label, `'~'`, when you pass it to
 `close`). Refer to projects by path when running `up`; `ls` gives you
 the path.

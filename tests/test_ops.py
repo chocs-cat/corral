@@ -11,10 +11,10 @@ def labels_in(herdr, ws):
 
 
 def test_up_builds_utility_and_default_agent(herdr, cfg, root):
-    res = ops.up(herdr, cfg, root / "cruzainet" / "api")
+    res = ops.up(herdr, cfg, root / "shop" / "api")
     assert res.action == "created"
-    assert res.label == "cruzainet/api"
-    assert labels_in(herdr, res.workspace) == ["cruzainet/api", f"Sonnet{B}medium"]
+    assert res.label == "shop/api"
+    assert labels_in(herdr, res.workspace) == ["shop/api", f"Sonnet{B}medium"]
     utility_panes = [p for p in herdr.panes.values() if p["tab"].endswith("t2")]
     assert len(utility_panes) == 3
     start = next(c for c in herdr.calls if c[0] == "agent_start")
@@ -48,7 +48,7 @@ def test_new_agent_tab_gets_suffix_and_unique_agent_name(herdr, cfg, root):
 
 
 def test_agent_name_collision_falls_back_to_pane_id(herdr, cfg, root):
-    ops.up(herdr, cfg, root / "cruzainet")  # takes claude-sonnet-medium
+    ops.up(herdr, cfg, root / "shop")  # takes claude-sonnet-medium
     ws = ops.up(herdr, cfg, root / "courses", no_agent=True).workspace
     res = ops.tab(herdr, cfg, ["sonnet"], ws=ws)
     assert res[0].action == "added"

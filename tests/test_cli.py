@@ -26,11 +26,11 @@ def test_up_json(run, root, capsys):
 
 
 def test_ls_json_matches_workspaces(run, root, capsys):
-    run("up", str(root / "cruzainet" / "api"), "--no-focus")
+    run("up", str(root / "shop" / "api"), "--no-focus")
     capsys.readouterr()
     assert run("ls", "--json", "--open") == 0
     out = json.loads(capsys.readouterr().out)
-    assert [p["project"] for p in out["projects"]] == ["cruzainet/api"]
+    assert [p["project"] for p in out["projects"]] == ["shop/api"]
     assert out["projects"][0]["workspace"]["agents"][0]["status"] == "idle"
 
 
