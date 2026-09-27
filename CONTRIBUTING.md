@@ -31,7 +31,7 @@ Tests use `tests/fake_herdr.py`, an in-memory herdr with the same methods as
 
 ## Roadmap and decisions
 
-Planned work and ideas are [GitHub issues](https://github.com/johnfoland/corral/issues);
+Planned work and ideas are [GitHub issues](https://github.com/chocs-cat/corral/issues);
 look there before starting something, and open one for anything you won't
 finish now. Settled design questions are in [docs/decisions.md](docs/decisions.md).
 Coding agents also follow [AGENTS.md](AGENTS.md).
@@ -72,7 +72,7 @@ add a `Release-As: 1.0.0` footer to a commit.
 ### One-time setup
 
 - **PyPI trusted publishing:** on pypi.org, add a pending publisher for
-  project `corral-herdr`: owner `johnfoland`, repo `corral`, workflow `release.yml`,
+  project `corral-herdr`: owner `chocs-cat`, repo `corral`, workflow `release.yml`,
   environment `pypi`.
 - **GitHub environment:** create an environment named `pypi` in the repo
   settings. Optionally require approval there.
@@ -89,10 +89,10 @@ add a `Release-As: 1.0.0` footer to a commit.
 ### Homebrew
 
 The formula is `Formula/corral-herdr.rb` in
-[johnfoland/homebrew-tap](https://github.com/johnfoland/homebrew-tap). After a
+[chocs-cat/homebrew-tap](https://github.com/chocs-cat/homebrew-tap). After a
 PyPI release, update `url`/`sha256` to the new sdist and refresh the
 dependency resources with `brew update-python-resources corral-herdr`. That
 command ignores packages uploaded in the last 24 hours, so run it a day after
 the release, or copy the versions from `uv.lock`. Then check it with
-`brew audit --strict johnfoland/tap/corral-herdr`,
-`brew install --build-from-source johnfoland/tap/corral-herdr` and `brew test`.
+`brew audit --strict chocs-cat/tap/corral-herdr`,
+`brew install --build-from-source chocs-cat/tap/corral-herdr` and `brew test`.

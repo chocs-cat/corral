@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/johnfoland/corral/master/docs/logo-dark.svg">
-  <img alt="corral" src="https://raw.githubusercontent.com/johnfoland/corral/master/docs/logo-light.svg" height="64">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/chocs-cat/corral/master/docs/logo-dark.svg">
+  <img alt="corral" src="https://raw.githubusercontent.com/chocs-cat/corral/master/docs/logo-light.svg" height="64">
 </picture>
 
 Round up your projects into [herdr](https://herdr.dev) workspaces.
@@ -43,10 +43,10 @@ the `corral` command.
 ### Homebrew
 
 ```sh
-brew install johnfoland/tap/corral-herdr
+brew install chocs-cat/tap/corral-herdr
 ```
 
-The formula lives in the `johnfoland/tap` tap and brings its own Python. It's
+The formula lives in the `chocs-cat/tap` tap and brings its own Python. It's
 named `corral-herdr` because homebrew/core's `corral` is the Pony package
 manager, which also installs a `corral` command, so the two can't be installed
 together.
@@ -169,7 +169,7 @@ args = ["--model", "opus", "--effort", "{effort}"]
 `--json` CLI. The repo is also a Claude Code plugin marketplace:
 
 ```
-/plugin marketplace add johnfoland/corral
+/plugin marketplace add chocs-cat/corral
 /plugin install corral@corral
 ```
 
@@ -187,7 +187,7 @@ uv run ty check
 Tests run against an in-memory fake herdr (`tests/fake_herdr.py`); nothing
 touches a real herdr session. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 commit conventions and the release process, the
-[issues](https://github.com/johnfoland/corral/issues) for the roadmap, and
+[issues](https://github.com/chocs-cat/corral/issues) for the roadmap, and
 [docs/decisions.md](docs/decisions.md) for settled design questions.
 
 ## License
