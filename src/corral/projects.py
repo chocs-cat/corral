@@ -211,7 +211,7 @@ class AgentTab:
 def agent_tabs(snap: Snapshot, ws: str, cfg: Config) -> list[AgentTab]:
     """Tabs in ws hosting an agent, plus conforming "<Model>•<effort>" tabs
     whose agent has exited."""
-    displays = {m.display.lower() for m in cfg.models}
+    displays = {m.display.lower() for m in cfg.known_models}
     out = []
     for t in snap.tabs_in(ws):
         a = snap.agent_on_tab(t.id)

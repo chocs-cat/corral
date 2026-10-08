@@ -80,7 +80,7 @@ async def test_add_remove_and_reorder_default_agents(app, cfg_path):
         await pilot.click("#agent-add")
         await pilot.pause(0.2)
         assert isinstance(app.screen, AgentPicker)
-        await pilot.press("down", "enter", "down", "enter")  # opus -> high
+        await pilot.press("up", "enter", "down", "enter")  # sonnet is highlighted: opus -> high
         await pilot.pause(0.2)
         assert s.default_agents == ["sonnet/medium", "opus/high"]
         await pilot.click("#agent-up")  # the new one is highlighted
@@ -107,16 +107,34 @@ async def test_model_editor_adds_and_edits(app, cfg_path):
         ed.query_one("#m-args", Input).value = "--model pro --effort {effort}"
         await pilot.pause(0.1)
         assert "gemini --model pro --effort" in str(ed.query_one("#m-preview").render())
-        ed.query_one("#m-key", Input).value = "opus"  # taken
-        await pilot.pause(0.1)
-        await pilot.press("ctrl+s")
-        assert isinstance(app.screen, ModelEditor)  # refused
-        ed.query_one("#m-key", Input).value = "gem"
         await pilot.press("ctrl+s")
         await pilot.pause(0.2)
-        assert [m.key for m in s.models][-1] == "gem"
+        assert [m.key for m in s.custom] == ["gem"]
+        # a second custom model can't take the first one's key
+        await pilot.click("#model-add")
+        await pilot.pause(0.2)
+        app.screen.query_one("#m-key", Input).value = "gem"
+        app.screen.query_one("#m-display", Input).value = "Other"
+        await pilot.press("ctrl+s")
+        assert isinstance(app.screen, ModelEditor)  # refused
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        # customize a built-in: a custom model with its key replaces it
+        s.query_one("#builtin-table", DataTable).move_cursor(row=1)  # sonnet
+        await pilot.click("#builtin-customize")
+        await pilot.pause(0.2)
+        ed = app.screen
+        assert isinstance(ed, ModelEditor)
+        assert ed.query_one("#m-key", Input).disabled
+        ed.query_one("#m-display", Input).value = "Son"
+        await pilot.press("ctrl+s")
+        await pilot.pause(0.2)
+        assert [(m.key, m.display) for m in s.custom] == [("gem", "Gemini"), ("sonnet", "Son")]
+        assert "replaced by custom" in str(
+            s.query_one("#builtin-table", DataTable).get_row("sonnet")
+        )
         # rename a model a default agent uses: the default follows it
-        s.query_one("#model-table", DataTable).move_cursor(row=0)
+        s.query_one("#custom-table", DataTable).move_cursor(row=1)
         await pilot.click("#model-edit")
         await pilot.pause(0.2)
         app.screen.query_one("#m-key", Input).value = "son"
@@ -126,33 +144,34 @@ async def test_model_editor_adds_and_edits(app, cfg_path):
         await pilot.press("ctrl+s")
         await settle(pilot, app)
     data = saved(cfg_path)
-    assert [m["key"] for m in data["models"]] == [
-        "son",
-        "opus",
-        "haiku",
-        "sol",
-        "astra",
-        "luna",
-        "codex",
-        "gem",
-    ]
-    assert data["models"][-1]["args"] == ["--model", "pro", "--effort", "{effort}"]
+    assert [m["key"] for m in data["models"]] == ["gem", "son"]
+    assert data["models"][0]["args"] == ["--model", "pro", "--effort", "{effort}"]
     assert data["default_agents"] == ["son/medium"]
     assert "gemini" in data["efforts"]
+    assert "hide_models" not in data
 
 
-async def test_deleting_a_default_agents_model_drops_it_from_defaults(app, cfg_path):
+async def test_hiding_a_default_agents_model_drops_it_from_defaults(app, cfg_path):
     async with app.run_test(size=(160, 50)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-models")
-        s.query_one("#model-table", DataTable).move_cursor(row=0)  # sonnet
-        await pilot.click("#model-delete")
+        s.query_one("#builtin-table", DataTable).move_cursor(row=1)  # sonnet
+        await pilot.pause(0.1)
+        await pilot.click("#builtin-hide")
         assert s.default_agents == []
+        assert str(s.query_one("#builtin-hide", Button).label) == "Show"
+        s.query_one("#builtin-table", DataTable).move_cursor(row=2)  # fable
+        await pilot.pause(0.1)
+        await pilot.click("#builtin-hide")
+        await pilot.pause(0.2)
+        await pilot.click("#builtin-hide")  # and back
         await pilot.press("ctrl+s")
         await settle(pilot, app)
     data = saved(cfg_path)
     assert data["default_agents"] == []
-    assert "sonnet" not in [m["key"] for m in data["models"]]
+    assert data["hide_models"] == ["sonnet"]
+    assert "models" not in data
+    assert "sonnet" not in [m.key for m in app.cfg.models]
 
 
 async def test_cancel_asks_only_when_something_changed(app, cfg_path):

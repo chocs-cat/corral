@@ -153,24 +153,41 @@ bottom_right = "lazygit"
 top_percent = 50                    # the top pane's share of the height
 bottom_left_percent = 35            # the bottom-left pane's share of the bottom row
 
-[efforts]
+[efforts]                           # for models that don't list their own
 claude = ["low", "medium", "high", "xhigh", "max"]
 
-[[models]]                          # any herdr agent kind: claude, codex, gemini, opencode, ...
-key = "opus"
-tool = "claude"
-display = "Opus"
-args = ["--model", "opus", "--effort", "{effort}"]
-# efforts = ["low", "high"]         # this model's levels, instead of the tool's
+hide_models = ["5.6-sol"]           # built-in models you don't want offered
+
+[[models]]                          # a custom model; any herdr agent kind
+key = "gem"
+tool = "gemini"
+display = "Gemini"
+args = ["--model", "gemini-3-pro"]
+efforts = ["default"]               # optional: this model's own levels
 ```
 
-Without `[[models]]`, corral offers Sonnet, Opus and Haiku, then the models
-your installed Codex lists (`codex debug models`) with each one's own effort
-levels, then `codex` for whatever model your Codex config picks. The first
-model of each family gets the short name (`sol`, `astra`, `luna`); older ones
-keep their version (`5.6-sol`). If Codex isn't installed or its catalog can't
-be read, corral uses its packaged list: GPT-6.1 Sol, GPT-6 Astra and GPT-6
-Luna. Defining any `[[models]]` replaces all of this.
+### Models
+
+**Built-in models** come from the agent CLIs installed on the machine, so
+they keep up with new releases without a corral update:
+
+- **Claude Code**: the models in the main section of its model picker, by
+  alias (`opus`, `sonnet`, `fable`, `haiku`), with their effort levels.
+  Claude Code has no command that lists them, so corral reads the catalog it
+  caches under `~/.claude/cache/model-catalog` (or `$CLAUDE_CONFIG_DIR`).
+- **Codex**: the models `codex debug models` lists, with their effort
+  levels. The newest of each family gets the short key (`sol`, `astra`,
+  `luna`); older ones keep their version (`5.6-sol`).
+- `codex`: whatever model your Codex config picks.
+
+When a CLI isn't installed or its catalog can't be read, corral's packaged
+list stands in: Opus, Sonnet, Fable and Haiku; GPT-6.1 Sol, GPT-6 Astra and
+GPT-6 Luna. `hide_models` drops built-ins you don't use.
+
+**Custom models** are the file's `[[models]]`, offered after the built-ins.
+One with a built-in's key replaces that built-in. `corral models` shows
+where each model comes from; the settings screen's Models tab lists the two
+kinds separately.
 
 ## Agent skill
 

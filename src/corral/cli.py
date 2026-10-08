@@ -230,16 +230,20 @@ def cmd_models(ctx: Ctx) -> int:
             json.dumps(
                 {
                     "models": [{**asdict(m), "efforts": cfg.efforts_of(m)} for m in cfg.models],
+                    "hidden": [asdict(m) for m in cfg.known_models if m not in cfg.models],
                     "efforts": {m.tool: cfg.efforts_for(m.tool) for m in cfg.models},
                 },
                 indent=2,
             )
         )
         return EXIT_OK
-    print(f"{'key':<10} {'tool':<8} {'display':<10} efforts / args")
+    print(f"{'key':<10} {'tool':<8} {'display':<10} {'from':<12} efforts / args")
     for m in cfg.models:
-        print(f"{m.key:<10} {m.tool:<8} {m.display:<10} {'|'.join(cfg.efforts_of(m))}")
-        print(f"{'':<30} {' '.join(m.args)}")
+        src = config.SOURCE_NAMES.get(m.source, m.source)
+        print(f"{m.key:<10} {m.tool:<8} {m.display:<10} {src:<12} {'|'.join(cfg.efforts_of(m))}")
+        print(f"{'':<43} {' '.join(m.args)}")
+    if hidden := [m.key for m in cfg.known_models if m not in cfg.models]:
+        print(f"\nhidden: {', '.join(hidden)}")
     return EXIT_OK
 
 
@@ -319,6 +323,7 @@ def cmd_config(ctx: Ctx) -> int:
             "utility": asdict(cfg.utility),
             "efforts": cfg.efforts,
             "models": [asdict(m) for m in cfg.models],
+            "hide_models": sorted(cfg.hide_models),
         }
         print(json.dumps(shown, indent=2, ensure_ascii=False))
     return EXIT_OK

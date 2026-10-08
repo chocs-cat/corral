@@ -50,7 +50,8 @@ def cfg(root: Path) -> Config:
 def _packaged_codex_models(monkeypatch):
     """Default models without asking the installed Codex, so tests don't
     depend on the machine."""
-    monkeypatch.setattr(config, "codex_models", lambda: None)
+    monkeypatch.setattr(config, "claude_models", lambda: None)
+    monkeypatch.setattr(config, "codex_catalog", lambda: None)
 
 
 @pytest.fixture(autouse=True)

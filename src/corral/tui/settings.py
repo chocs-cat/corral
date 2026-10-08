@@ -229,7 +229,8 @@ class FolderPicker(ModalScreen[Path | None]):
 
 
 class ModelEditor(ModalScreen[ModelSpec | None]):
-    """Add or edit one model of the matrix."""
+    """Add or edit a custom model. With `new`, `model` is a built-in to
+    start from: saving makes a custom model that replaces it."""
 
     DEFAULT_CSS = """
     ModelEditor .row { height: auto; }
@@ -252,9 +253,11 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         kinds: list[str],
         taken: set[str],
         efforts: dict[str, list[str]],
+        new: bool = False,
     ) -> None:
         super().__init__()
         self.model = model
+        self.new = new
         self.kinds = sorted(set(kinds or AGENT_KINDS) | ({model.tool} if model else set()))
         self.taken = taken
         self.efforts = efforts
@@ -262,7 +265,11 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
     def compose(self) -> ComposeResult:
         m = self.model
         with Vertical(classes="dialog"):
-            yield Label("Edit model" if m else "Add a model", classes="title")
+            if m and self.new:
+                title = f"Customize {m.display} (replaces the built-in)"
+            else:
+                title = "Edit model" if m else "Add a model"
+            yield Label(title, classes="title")
             with Horizontal(classes="row"):
                 yield Label("Key", classes="field")
                 yield Input(m.key if m else "", placeholder="opus", id="m-key")
@@ -295,6 +302,8 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
 
     def on_mount(self) -> None:
         self.query_one("#m-key" if not self.model else "#m-display", Input).focus()
+        if self.new:  # the key is what makes it replace the built-in
+            self.query_one("#m-key", Input).disabled = True
         self.update_preview()
 
     @on(Input.Changed)
@@ -378,7 +387,8 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .warning { color: $warning; height: auto; margin-top: 1; }
     SettingsScreen .section { margin-top: 1; text-style: bold; }
     SettingsScreen #default-agents { height: auto; max-height: 12; margin-top: 1; }
-    SettingsScreen #model-table { height: auto; max-height: 14; margin-top: 1; }
+    SettingsScreen #builtin-table { height: auto; max-height: 16; margin-top: 1; }
+    SettingsScreen #custom-table { height: auto; max-height: 10; margin-top: 1; }
     SettingsScreen .buttons { height: auto; margin-top: 1; }
     SettingsScreen .buttons > Button { margin-right: 1; }
     SettingsScreen #util-diagram { margin-left: 18; margin-top: 1; color: $text-muted; }
@@ -405,7 +415,9 @@ class SettingsScreen(Screen[Config | None]):
         self.kinds = kinds or []
         self.root_override = root_override
         self.orig = config.load_file(path)
-        self.models: list[ModelSpec] = list(self.orig.models)
+        self.builtins: tuple[ModelSpec, ...] = self.orig.builtin_models
+        self.custom: list[ModelSpec] = list(self.orig.custom_models)
+        self.hidden: set[str] = set(self.orig.hide_models)
         self.efforts: dict[str, list[str]] = {k: list(v) for k, v in self.orig.efforts.items()}
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
@@ -516,11 +528,26 @@ class SettingsScreen(Screen[Config | None]):
             with TabPane("Models", id="tab-models"):
                 yield Static(
                     "The models you can open agent tabs with. Tabs are named "
-                    "<tab name>•<effort>, e.g. Opus•high. Until you change this "
-                    "list, the Codex models are the ones your installed Codex offers.",
+                    "<tab name>•<effort>, e.g. Opus•high.",
                     classes="note",
                 )
-                yield DataTable(id="model-table", cursor_type="row", zebra_stripes=True)
+                yield Static("Built-in", classes="section")
+                yield Static(
+                    "From Claude Code and Codex on this machine, so they follow those "
+                    "tools' updates; corral's packaged list stands in when one can't say. "
+                    "Hide the ones you don't use, or customize one to change it.",
+                    classes="note",
+                )
+                yield DataTable(id="builtin-table", cursor_type="row", zebra_stripes=True)
+                with Horizontal(classes="buttons"):
+                    yield Button("Hide", id="builtin-hide")
+                    yield Button("Customize…", id="builtin-customize")
+                yield Static("Custom", classes="section")
+                yield Static(
+                    "Yours, kept in the config file. One with a built-in's key replaces it.",
+                    classes="note",
+                )
+                yield DataTable(id="custom-table", cursor_type="row", zebra_stripes=True)
                 with Horizontal(classes="buttons"):
                     yield Button("Add…", id="model-add")
                     yield Button("Edit…", id="model-edit")
@@ -528,7 +555,11 @@ class SettingsScreen(Screen[Config | None]):
                     yield Button("Move up", id="model-up")
                     yield Button("Move down", id="model-down")
                 yield Static("Effort levels per agent", classes="section")
-                yield Static("offered when you add an agent tab, lowest first", classes="note")
+                yield Static(
+                    "offered when you add an agent tab, lowest first, for models "
+                    "that don't list their own",
+                    classes="note",
+                )
                 yield Vertical(id="effort-rows")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
@@ -567,8 +598,12 @@ class SettingsScreen(Screen[Config | None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        table = self.query_one("#model-table", DataTable)
-        table.add_columns("Key", "Tab name", "Agent", "Arguments")
+        self.query_one("#builtin-table", DataTable).add_columns(
+            "Key", "Tab name", "From", "Efforts", "Status"
+        )
+        self.query_one("#custom-table", DataTable).add_columns(
+            "Key", "Tab name", "Agent", "Arguments"
+        )
         self.render_models()
         self.render_agents()
         for key, _ in UTILITY_PANES:
@@ -624,17 +659,19 @@ class SettingsScreen(Screen[Config | None]):
 
     # agents
 
-    def draft_config(self) -> Config:
+    def draft_config(self, custom: list[ModelSpec] | None = None) -> Config:
         """The model matrix being edited, for the agent picker."""
         return Config(
-            models=tuple(self.models),
+            builtin_models=self.builtins,
+            custom_models=tuple(self.custom if custom is None else custom),
+            hide_models=frozenset(self.hidden),
             efforts=dict(self.efforts),
             default_agents=tuple(self.default_agents),
         )
 
     def spec_label(self, spec: str) -> Text:
         key, effort = ops.parse_spec(spec)
-        model = next((m for m in self.models if m.key == key), None)
+        model = next((m for m in self.draft_config().models if m.key == key), None)
         if not model:
             return Text(f"{spec}  (unknown model)", style="red")
         return Text.assemble(
@@ -789,21 +826,57 @@ class SettingsScreen(Screen[Config | None]):
 
     # models
 
-    def render_models(self, highlight: int | None = None) -> None:
-        table = self.query_one("#model-table", DataTable)
+    def render_models(self, builtin: int | None = None, custom: int | None = None) -> None:
+        draft = self.draft_config()
+        table = self.query_one("#builtin-table", DataTable)
+        row = table.cursor_row
         table.clear()
-        for m in self.models:
+        for m in self.builtins:
+            if draft.replaced(m):
+                status = Text("replaced by custom", style="yellow")
+            elif m.key in self.hidden:
+                status = Text("hidden", style="dim")
+            else:
+                status = Text("offered", style="green")
+            dim = "dim" if m.key in self.hidden or draft.replaced(m) else ""
+            table.add_row(
+                Text(m.key, style=dim),
+                Text(m.display, style=dim),
+                config.SOURCE_NAMES.get(m.source, m.source),
+                " ".join(draft.efforts_of(m)),
+                status,
+                key=m.key,
+            )
+        if self.builtins:
+            table.move_cursor(
+                row=max(0, min(row if builtin is None else builtin, len(self.builtins) - 1))
+            )
+        table = self.query_one("#custom-table", DataTable)
+        table.clear()
+        for m in self.custom:
             table.add_row(m.key, m.display, m.tool, join_args(m.args), key=m.key)
-        if highlight is not None and self.models:
-            table.move_cursor(row=max(0, min(highlight, len(self.models) - 1)))
+        if custom is not None and self.custom:
+            table.move_cursor(row=max(0, min(custom, len(self.custom) - 1)))
+        self.update_hide_button()
         self.render_effort_rows()
 
+    def update_hide_button(self) -> None:
+        m = self.builtin_at()
+        self.query_one("#builtin-hide", Button).label = (
+            "Show" if m and m.key in self.hidden else "Hide"
+        )
+
+    @on(DataTable.RowHighlighted, "#builtin-table")
+    def builtin_highlighted(self) -> None:
+        self.update_hide_button()
+
     def render_effort_rows(self) -> None:
-        """One effort-levels input per agent kind the models use."""
+        """One effort-levels input per agent kind used by a model without
+        its own levels."""
         self.save_effort_rows()
         box = self.query_one("#effort-rows", Vertical)
         box.remove_children()
-        tools = list(dict.fromkeys(m.tool for m in self.models))
+        tools = list(dict.fromkeys(m.tool for m in self.draft_config().models if not m.efforts))
         rows = []
         for tool in tools:
             levels = self.efforts.get(tool) or config.FALLBACK_EFFORTS
@@ -822,9 +895,59 @@ class SettingsScreen(Screen[Config | None]):
             if box.name and levels:
                 self.efforts[box.name] = levels
 
+    def builtin_at(self) -> ModelSpec | None:
+        table = self.query_one("#builtin-table", DataTable)
+        return self.builtins[table.cursor_row] if self.builtins and table.row_count else None
+
     def model_index(self) -> int | None:
-        table = self.query_one("#model-table", DataTable)
-        return table.cursor_row if self.models and table.row_count else None
+        table = self.query_one("#custom-table", DataTable)
+        return table.cursor_row if self.custom and table.row_count else None
+
+    def drop_unoffered_defaults(self, display: str) -> None:
+        """Take default agent tabs whose model is no longer offered out."""
+        offered = {m.key for m in self.draft_config().models}
+        before = len(self.default_agents)
+        self.default_agents = [s for s in self.default_agents if ops.parse_spec(s)[0] in offered]
+        if len(self.default_agents) != before:
+            self.notify(f"{display} was also removed from the default agent tabs")
+        self.render_agents()
+
+    @on(Button.Pressed, "#builtin-hide")
+    def builtin_hide(self) -> None:
+        m = self.builtin_at()
+        if not m:
+            return
+        if m.key in self.hidden:
+            self.hidden.discard(m.key)
+        else:
+            if len(self.draft_config().models) == 1:
+                self.notify("keep at least one model", severity="error")
+                return
+            self.hidden.add(m.key)
+        self.render_models()
+        self.drop_unoffered_defaults(m.display)
+
+    @on(Button.Pressed, "#builtin-customize")
+    @on(DataTable.RowSelected, "#builtin-table")
+    def builtin_customize(self) -> None:
+        """Edit a built-in as a custom model with its key, which replaces it;
+        if one already does, edit that."""
+        m = self.builtin_at()
+        if not m:
+            return
+        i = next((i for i, c in enumerate(self.custom) if c.key == m.key), None)
+        if i is not None:
+            self.edit_custom(i)
+            return
+        self.save_effort_rows()
+
+        def done(spec: ModelSpec | None) -> None:
+            if spec:
+                self.custom.append(spec)
+                self.render_models(custom=len(self.custom) - 1)
+
+        taken = {c.key for c in self.custom}
+        self.app.push_screen(ModelEditor(m, self.kinds, taken, self.efforts, new=True), done)
 
     @on(Button.Pressed, "#model-add")
     def model_add(self) -> None:
@@ -832,35 +955,37 @@ class SettingsScreen(Screen[Config | None]):
 
         def done(spec: ModelSpec | None) -> None:
             if spec:
-                self.models.append(spec)
-                self.render_models(len(self.models) - 1)
+                self.custom.append(spec)
+                self.render_models(custom=len(self.custom) - 1)
 
-        taken = {m.key for m in self.models}
+        taken = {m.key for m in self.custom}
         self.app.push_screen(ModelEditor(None, self.kinds, taken, self.efforts), done)
 
     @on(Button.Pressed, "#model-edit")
-    @on(DataTable.RowSelected, "#model-table")
+    @on(DataTable.RowSelected, "#custom-table")
     def model_edit(self) -> None:
         i = self.model_index()
-        if i is None:
-            return
+        if i is not None:
+            self.edit_custom(i)
+
+    def edit_custom(self, i: int) -> None:
         self.save_effort_rows()
-        old = self.models[i]
+        old = self.custom[i]
 
         def done(spec: ModelSpec | None) -> None:
             if not spec:
                 return
-            self.models[i] = spec
+            self.custom[i] = spec
             if spec.key != old.key:  # keep default agents pointing at it
                 self.default_agents = [
                     f"{spec.key}/{e}" if k == old.key else s
                     for s in self.default_agents
                     for k, e in [ops.parse_spec(s)]
                 ]
-            self.render_models(i)
+            self.render_models(custom=i)
             self.render_agents()
 
-        taken = {m.key for m in self.models} - {old.key}
+        taken = {m.key for m in self.custom} - {old.key}
         self.app.push_screen(ModelEditor(old, self.kinds, taken, self.efforts), done)
 
     @on(Button.Pressed, "#model-delete")
@@ -868,24 +993,21 @@ class SettingsScreen(Screen[Config | None]):
         i = self.model_index()
         if i is None:
             return
-        if len(self.models) == 1:
+        gone = self.custom[i]
+        if not self.draft_config(custom=[c for c in self.custom if c is not gone]).models:
             self.notify("keep at least one model", severity="error")
             return
-        gone = self.models.pop(i)
-        before = len(self.default_agents)
-        self.default_agents = [s for s in self.default_agents if ops.parse_spec(s)[0] != gone.key]
-        if len(self.default_agents) != before:
-            self.notify(f"{gone.display} was also removed from the default agent tabs")
-        self.render_models(i)
-        self.render_agents()
+        self.custom.pop(i)
+        self.render_models(custom=i)
+        self.drop_unoffered_defaults(gone.display)
 
     @on(Button.Pressed, "#model-up")
     @on(Button.Pressed, "#model-down")
     def model_move(self, event: Button.Pressed) -> None:
         step = -1 if event.button.id == "model-up" else 1
-        j = _move(self.models, self.model_index(), step)
+        j = _move(self.custom, self.model_index(), step)
         if j is not None:
-            self.render_models(j)
+            self.render_models(custom=j)
 
     # save / cancel
 
@@ -917,7 +1039,7 @@ class SettingsScreen(Screen[Config | None]):
             if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
                 raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
         self.save_effort_rows()
-        used = {m.tool for m in self.models}
+        used = {m.tool for m in self.draft_config().models}
         efforts = {
             t: v for t, v in self.efforts.items() if t in used or t in config.DEFAULT_EFFORTS
         }
@@ -938,7 +1060,8 @@ class SettingsScreen(Screen[Config | None]):
                 top_percent=sizes["top_percent"],
                 bottom_left_percent=sizes["bottom_left_percent"],
             ),
-            models=tuple(self.models),
+            custom_models=tuple(self.custom),
+            hide_models=frozenset(self.hidden),
             efforts=efforts,
         )
 

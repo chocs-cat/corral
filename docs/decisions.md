@@ -141,15 +141,23 @@ shell. corral explains what each does and installs them when asked
 first of Homebrew, pacman or (lazygit only) `go install` that it finds. The
 installer runs in the user's terminal, so sudo and confirmation prompts work.
 
-## Default Codex models come from the installed Codex (2026-10)
+## Built-in models come from the agent CLIs; custom models add to them (2026-10)
 
-With no `[[models]]` in the config, corral reads `codex debug models` once
-per process and offers the models it lists (not the hidden ones), in Codex's
-order, each with its own effort levels. The first model of each family gets
-the short key (`sol`); later ones keep their version (`5.6-sol`). This keeps
-the list current without a corral release, at the cost of relying on a
-`debug` subcommand whose format isn't promised: if Codex is missing or its
-output can't be read, corral falls back to a packaged list (GPT-6.1 Sol,
-GPT-6 Astra, GPT-6 Luna). `codex` (Codex's own default model) is always
-offered. `corral config init` leaves `[[models]]` commented out so a new file
-doesn't freeze the list.
+corral's models are built-in or custom. The built-ins are read, once per
+process, from the agent CLIs installed on the machine, so they follow new
+releases without a corral release: Claude Code's main-section models by
+alias, from the model catalog it caches under `~/.claude/cache/model-catalog`
+(it has no command that lists them), and the models `codex debug models`
+lists, each with its own effort levels. Neither source is a documented
+interface, so each falls back to a packaged list (Opus, Sonnet, Fable,
+Haiku; GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna) when it is missing or can't be
+read. For Codex, the first model of each family gets the short key (`sol`);
+later ones keep their version (`5.6-sol`). `codex` (Codex's own default
+model) is always offered.
+
+Custom models are the file's `[[models]]`. They are added after the
+built-ins rather than replacing the list, and one with a built-in's key
+replaces that built-in in place; `hide_models` drops built-ins. This
+replaced "defining any `[[models]]` replaces the defaults", which froze a
+copy of the built-ins in each user's file. `corral config init` leaves
+`[[models]]` commented out.

@@ -32,15 +32,7 @@ def test_default_toml_round_trips(tmp_path, monkeypatch):
     f.write_text(config.DEFAULT_TOML)
     cfg = config.load(f)
     assert cfg.path == f
-    assert [m.key for m in cfg.models] == [
-        "sonnet",
-        "opus",
-        "haiku",
-        "sol",
-        "astra",
-        "luna",
-        "codex",
-    ]
+    assert cfg.models == config.builtin_models()
     assert cfg.utility.top == "yazi"
     assert (cfg.utility.top_percent, cfg.utility.bottom_left_percent) == (50, 35)
 
@@ -105,9 +97,10 @@ def test_utility_sizes(tmp_path):
             config.load_file(f)
 
 
-ask_codex = config.codex_models  # the real one; conftest stubs it out per test
+read_claude = config.claude_models  # the real ones; conftest stubs them out per test
+ask_codex = config.codex_catalog
 
-CATALOG = {
+CODEX_CATALOG = {
     "models": [
         {
             "slug": "gpt-6-luna",
@@ -129,24 +122,112 @@ CATALOG = {
 }
 
 
+def effort(*ids):
+    return {"type": "effort", "effort_options": [{"id": i} for i in ids]}
+
+
+CLAUDE_CATALOG = {
+    "version": 2,
+    "catalog": {
+        "surface": "cc",
+        "config": {
+            "models": [
+                {
+                    "id": "claude-opus-5-5",
+                    "short_name": "Opus",
+                    "section": "main",
+                    "thinking": effort("low", "max"),
+                },
+                {
+                    "id": "claude-quick-1",
+                    "short_name": "Quick",
+                    "section": "main",
+                    "thinking": {"type": "none"},
+                },
+                {
+                    "id": "claude-opus-5",
+                    "short_name": "Opus",
+                    "section": "overflow",
+                    "thinking": effort("low"),
+                },
+            ]
+        },
+    },
+}
+
+
 def test_codex_catalog_becomes_models():
-    specs = config.parse_codex_catalog(CATALOG)
-    assert [(m.key, m.display) for m in specs] == [
-        ("sol", "Sol"),
-        ("6-sol", "6-Sol"),
-        ("luna", "Luna"),
+    specs = config.parse_codex_catalog(CODEX_CATALOG)
+    assert [(m.key, m.display, m.source) for m in specs] == [
+        ("sol", "Sol", "codex"),
+        ("6-sol", "6-Sol", "codex"),
+        ("luna", "Luna", "codex"),
     ]
     assert specs[0].args_for("high") == ["-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high"]
     assert specs[2].efforts == ("low", "max")
+    assert config.parse_codex_catalog(CODEX_CATALOG, {"sol"})[0].key == "6.1-sol"
 
 
-def test_default_models_come_from_codex(monkeypatch):
-    monkeypatch.setattr(config, "codex_models", lambda: config.parse_codex_catalog(CATALOG))
-    cfg = config.Config()
-    keys = [m.key for m in cfg.models]
-    assert keys == ["sonnet", "opus", "haiku", "sol", "6-sol", "luna", "codex"]
+def test_claude_catalog_becomes_models():
+    opus, quick = config.parse_claude_catalog(CLAUDE_CATALOG)
+    assert (opus.key, opus.display, opus.source, opus.efforts) == (
+        "opus",
+        "Opus",
+        "claude-code",
+        ("low", "max"),
+    )
+    assert opus.args_for("max") == ["--model", "opus", "--effort", "max"]
+    assert quick.efforts == ("default",)
+    assert quick.args_for("default") == ["--model", "quick"]  # no --effort
+
+
+def test_builtin_models_come_from_the_clis(monkeypatch):
+    monkeypatch.setattr(
+        config, "claude_models", lambda: config.parse_claude_catalog(CLAUDE_CATALOG)
+    )
+    monkeypatch.setattr(config, "codex_catalog", lambda: CODEX_CATALOG)
+    cfg = config.Config(default_agents=())
+    assert [(m.key, m.source) for m in cfg.models] == [
+        ("opus", "claude-code"),
+        ("quick", "claude-code"),
+        ("sol", "codex"),
+        ("6-sol", "codex"),
+        ("luna", "codex"),
+        ("codex", "packaged"),
+    ]
     assert cfg.efforts_of(cfg.model("luna")) == ["low", "max"]
     assert cfg.efforts_of(cfg.model("codex")) == config.DEFAULT_EFFORTS["codex"]
+
+
+def test_without_the_clis_the_packaged_lists_stand_in():
+    cfg = config.Config()
+    assert {m.source for m in cfg.models} == {"packaged"}
+    assert [m.key for m in cfg.models] == [
+        "opus",
+        "sonnet",
+        "fable",
+        "haiku",
+        "sol",
+        "astra",
+        "luna",
+        "codex",
+    ]
+
+
+def test_reading_claude_codes_catalog(home, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    read_claude.cache_clear()
+    assert read_claude() is None  # no cache yet
+    d = home / ".claude" / "cache" / "model-catalog"
+    d.mkdir(parents=True)
+    (d / "org-abc-ccd.json").write_text("{}")  # the desktop app's: ignored
+    (d / "org-abc-cc.json").write_text("not json")
+    read_claude.cache_clear()
+    assert read_claude() is None
+    (d / "org-abc-cc.json").write_text(json.dumps(CLAUDE_CATALOG))
+    read_claude.cache_clear()
+    assert [m.key for m in read_claude() or ()] == ["opus", "quick"]
+    read_claude.cache_clear()
 
 
 def test_asking_codex_falls_back_quietly(monkeypatch):
@@ -161,22 +242,56 @@ def test_asking_codex_falls_back_quietly(monkeypatch):
     monkeypatch.setattr(config.subprocess, "run", run)
     ask_codex.cache_clear()
     assert ask_codex() is None
-    assert [m.key for m in config.Config().models][3:] == ["sol", "astra", "luna", "codex"]
 
     def run_ok(*a, **k):
-        return subprocess.CompletedProcess(a, 0, stdout=json.dumps(CATALOG))
+        return subprocess.CompletedProcess(a, 0, stdout=json.dumps(CODEX_CATALOG))
 
     monkeypatch.setattr(config.subprocess, "run", run_ok)
     ask_codex.cache_clear()
-    assert [m.key for m in ask_codex() or ()] == ["sol", "6-sol", "luna"]
+    assert ask_codex() == CODEX_CATALOG
     ask_codex.cache_clear()
 
 
-def test_model_efforts_round_trip(tmp_path):
+def test_custom_models_replace_add_and_hide(tmp_path):
     f = tmp_path / "c.toml"
-    f.write_text(
-        'default_agents=["l/low"]\n[[models]]\nkey="l"\ntool="codex"\ndisplay="L"\nefforts=["low","max"]\n'
-    )
+    f.write_text("""
+hide_models = ["fable", "luna"]
+[[models]]
+key = "gem"
+tool = "gemini"
+display = "Gemini"
+args = ["--x"]
+efforts = ["low", "max"]
+[[models]]
+key = "opus"
+tool = "claude"
+display = "Big"
+args = ["--model", "opus"]
+""")
     cfg = config.load_file(f)
-    assert cfg.efforts_of(cfg.model("l")) == ["low", "max"]
-    assert config.to_data(cfg)["models"][0]["efforts"] == ["low", "max"]
+    assert [(m.key, m.source) for m in cfg.models] == [
+        ("opus", "custom"),  # replaces the built-in, in its place
+        ("sonnet", "packaged"),
+        ("haiku", "packaged"),
+        ("sol", "packaged"),
+        ("astra", "packaged"),
+        ("codex", "packaged"),
+        ("gem", "custom"),
+    ]
+    assert cfg.efforts_of(cfg.model("gem")) == ["low", "max"]
+    assert cfg.replaced(cfg.builtin_models[0])
+    assert cfg.model_by_display("Fable")  # hidden, but its tabs are still agent tabs
+    with pytest.raises(ConfigError, match="unknown model 'luna'"):
+        cfg.model("luna")
+    data = config.to_data(cfg)
+    assert data["hide_models"] == ["fable", "luna"]
+    assert [m["key"] for m in data["models"]] == ["gem", "opus"]
+    assert data["models"][0]["efforts"] == ["low", "max"]
+
+
+def test_hiding_everything_is_refused(tmp_path):
+    f = tmp_path / "c.toml"
+    keys = [m.key for m in config.builtin_models()]
+    f.write_text(f"default_agents = []\nhide_models = {json.dumps(keys)}\n")
+    with pytest.raises(ConfigError, match="at least one model"):
+        config.load_file(f)

@@ -65,17 +65,18 @@ def test_edits_keep_comments_and_add_only_what_changed(cfg_file):
 
 def test_model_edits_in_place_and_reordering(cfg_file):
     c = config.load_file(cfg_file)
-    c.models = (c.models[0], replace(c.models[1], display="Big"))
+    c.custom_models = (c.custom_models[0], replace(c.custom_models[1], display="Big"))
     config.save(c, cfg_file)
     assert cfg_file.read_text() == HAND_WRITTEN.replace('display = "Opus"', 'display = "Big"')
 
-    c.models = (c.models[1], c.models[0], ModelSpec("gem", "gemini", "Gemini", ("--x",)))
+    gem = ModelSpec("gem", "gemini", "Gemini", ("--x",))
+    c.custom_models = (c.custom_models[1], c.custom_models[0], gem)
     config.save(c, cfg_file)
     text = cfg_file.read_text()
     assert text.index('key = "opus"') < text.index('key = "sonnet"') < text.index('key = "gem"')
     assert 'key = "opus"   # the big one' in text
     assert "\n\n\n" not in text  # one blank line between tables
-    assert [m.key for m in config.load_file(cfg_file).models] == ["opus", "sonnet", "gem"]
+    assert [m.key for m in config.load_file(cfg_file).custom_models] == ["opus", "sonnet", "gem"]
 
 
 def test_extra_skipped_folders_are_written_as_prune_extra(cfg_file):

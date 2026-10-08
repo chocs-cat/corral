@@ -110,18 +110,22 @@ says whether yazi and lazygit are installed and how corral would install them;
 go. It installs software on the user's machine (pacman runs under sudo), so
 ask before running it.
 
-`corral models --json` lists the models and each one's effort levels; check
-it rather than guessing a key. With no `[[models]]` in the file, the Codex
-models come from the installed Codex (`codex debug models`): the newest of
-each family has the short key (`sol`, `astra`, `luna`), older ones keep their
-version (`5.6-sol`), and `codex` runs Codex's own default model. Luna has no
-`ultra` effort.
+`corral models --json` lists the models, each with its `source` and effort
+levels; check it rather than guessing a key. Built-in models come from the
+installed CLIs (`claude-code`: Claude Code's cached model catalog; `codex`:
+`codex debug models`), or from corral's `packaged` list when a CLI can't
+say. For Codex, the newest of each family has the short key (`sol`,
+`astra`, `luna`), older ones keep their version (`5.6-sol`), and `codex`
+runs Codex's own default model. Effort levels differ by model (Luna has no
+`ultra`).
 
-To add a model, add a `[[models]]` entry with `key`, `tool` (the herdr agent
-kind: claude, codex, gemini, opencode, …), `display` and `args` (`{effort}` is
-substituted), and optionally `efforts` for that model's own levels. Any
-`[[models]]` entry replaces the whole default list. Effort levels per tool
-are under `[efforts]`.
+Built-ins update themselves, so don't copy them into the file. To drop one,
+add its key to `hide_models`. To add a model, add a `[[models]]` entry (a
+`custom` model) with `key`, `tool` (the herdr agent kind: claude, codex,
+gemini, opencode, …), `display` and `args` (`{effort}` is substituted), and
+optionally `efforts` for its own levels. A custom model with a built-in's key
+replaces that built-in. Effort levels per tool, for models without their
+own, are under `[efforts]`.
 
 ## Prompting an agent later
 
