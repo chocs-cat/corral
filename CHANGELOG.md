@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/chocs-cat/corral/compare/v0.5.1...v0.6.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** [[models]] no longer replaces the default list, the [efforts] table is no longer read, and the generic "codex" model is gone.
+
+### Features
+
+* **config:** built-in models from Claude Code and Codex, kept apart from custom ones ([#31](https://github.com/chocs-cat/corral/issues/31)) ([7ec5b1b](https://github.com/chocs-cat/corral/commit/7ec5b1b74ffc2c7d436ba83e88e1fb6ad727b372))
+
 ## [0.5.1](https://github.com/chocs-cat/corral/compare/v0.5.0...v0.5.1) (2026-09-27)
 
 
