@@ -231,7 +231,6 @@ def cmd_models(ctx: Ctx) -> int:
                 {
                     "models": [{**asdict(m), "efforts": cfg.efforts_of(m)} for m in cfg.models],
                     "hidden": [asdict(m) for m in cfg.known_models if m not in cfg.models],
-                    "efforts": {m.tool: cfg.efforts_for(m.tool) for m in cfg.models},
                 },
                 indent=2,
             )
@@ -321,7 +320,6 @@ def cmd_config(ctx: Ctx) -> int:
             "refresh_seconds": cfg.refresh_seconds,
             "agent_timeout_ms": cfg.agent_timeout_ms,
             "utility": asdict(cfg.utility),
-            "efforts": cfg.efforts,
             "models": [asdict(m) for m in cfg.models],
             "hide_models": sorted(cfg.hide_models),
         }

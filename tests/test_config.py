@@ -44,7 +44,7 @@ root = "/from/file"
 prune_extra = ["third_party"]
 default_agents = ["luna/high"]
 [efforts]
-gemini = ["low", "high"]
+gemini = ["low", "high"]  # no longer read
 [[models]]
 key = "luna"
 tool = "codex"
@@ -57,8 +57,9 @@ args = "-m gpt-5.6-luna -c model_reasoning_effort={effort}"
     assert "third_party" in cfg.prune
     assert "node_modules" in cfg.prune
     assert cfg.model("luna").args_for("high")[-1] == "model_reasoning_effort=high"
-    assert cfg.efforts_for("gemini") == ["low", "high"]
-    assert cfg.efforts_for("claude")[-1] == "max"  # defaults kept
+    assert cfg.efforts_for("gemini") == config.FALLBACK_EFFORTS  # no built-in gemini model
+    assert cfg.efforts_for("claude") == list(config.CLAUDE_EFFORTS)
+    assert cfg.efforts_of(cfg.model("luna")) == list(config.CODEX_EFFORTS)  # Sol's
 
     monkeypatch.setenv("CORRAL_ROOT", "/from/env")
     assert config.load(f).root == Path("/from/env")
@@ -97,7 +98,7 @@ def test_utility_sizes(tmp_path):
             config.load_file(f)
 
 
-read_claude = config.claude_models  # the real ones; conftest stubs them out per test
+ask_claude = config.claude_help  # the real ones; conftest stubs them out per test
 ask_codex = config.codex_catalog
 
 CODEX_CATALOG = {
@@ -121,39 +122,18 @@ CODEX_CATALOG = {
     ]
 }
 
+CLAUDE_HELP = """\
+Options:
+  --effort <level>                      Effort level for the current session
+                                        (low, medium, high, max)
+  --environment <environment_id>        Create a new cloud session
 
-def effort(*ids):
-    return {"type": "effort", "effort_options": [{"id": i} for i in ids]}
-
-
-CLAUDE_CATALOG = {
-    "version": 2,
-    "catalog": {
-        "surface": "cc",
-        "config": {
-            "models": [
-                {
-                    "id": "claude-opus-5-5",
-                    "short_name": "Opus",
-                    "section": "main",
-                    "thinking": effort("low", "max"),
-                },
-                {
-                    "id": "claude-quick-1",
-                    "short_name": "Quick",
-                    "section": "main",
-                    "thinking": {"type": "none"},
-                },
-                {
-                    "id": "claude-opus-5",
-                    "short_name": "Opus",
-                    "section": "overflow",
-                    "thinking": effort("low"),
-                },
-            ]
-        },
-    },
-}
+  --model <model>                       Model for the current session. Provide
+                                        an alias for the latest model (e.g.
+                                        'fable', 'opus', or 'muse') or a
+                                        model's full name.
+  -n, --name <name>                     Set a display name
+"""
 
 
 def test_codex_catalog_becomes_models():
@@ -168,66 +148,57 @@ def test_codex_catalog_becomes_models():
     assert config.parse_codex_catalog(CODEX_CATALOG, {"sol"})[0].key == "6.1-sol"
 
 
-def test_claude_catalog_becomes_models():
-    opus, quick = config.parse_claude_catalog(CLAUDE_CATALOG)
-    assert (opus.key, opus.display, opus.source, opus.efforts) == (
-        "opus",
-        "Opus",
-        "claude-code",
-        ("low", "max"),
-    )
-    assert opus.args_for("max") == ["--model", "opus", "--effort", "max"]
-    assert quick.efforts == ("default",)
-    assert quick.args_for("default") == ["--model", "quick"]  # no --effort
+def test_claude_help_becomes_models():
+    specs = config.parse_claude_help(CLAUDE_HELP)
+    # the packaged aliases, then any other the help names
+    assert [m.key for m in specs] == ["opus", "sonnet", "fable", "haiku", "muse"]
+    assert {m.efforts for m in specs} == {("low", "medium", "high", "max")}
+    assert specs[-1].display == "Muse"
+    assert specs[0].source == "claude-code"
+    assert specs[0].args_for("max") == ["--model", "opus", "--effort", "max"]
+    assert config.parse_claude_help("Options:\n  --model <model>  'opus'\n") == ()
 
 
 def test_builtin_models_come_from_the_clis(monkeypatch):
-    monkeypatch.setattr(
-        config, "claude_models", lambda: config.parse_claude_catalog(CLAUDE_CATALOG)
-    )
+    monkeypatch.setattr(config, "claude_help", lambda: CLAUDE_HELP)
     monkeypatch.setattr(config, "codex_catalog", lambda: CODEX_CATALOG)
     cfg = config.Config(default_agents=())
     assert [(m.key, m.source) for m in cfg.models] == [
         ("opus", "claude-code"),
-        ("quick", "claude-code"),
+        ("sonnet", "claude-code"),
+        ("fable", "claude-code"),
+        ("haiku", "claude-code"),
+        ("muse", "claude-code"),
         ("sol", "codex"),
         ("6-sol", "codex"),
         ("luna", "codex"),
-        ("codex", "packaged"),
     ]
     assert cfg.efforts_of(cfg.model("luna")) == ["low", "max"]
-    assert cfg.efforts_of(cfg.model("codex")) == config.DEFAULT_EFFORTS["codex"]
 
 
 def test_without_the_clis_the_packaged_lists_stand_in():
     cfg = config.Config()
     assert {m.source for m in cfg.models} == {"packaged"}
     assert [m.key for m in cfg.models] == [
-        "opus",
-        "sonnet",
-        "fable",
-        "haiku",
-        "sol",
-        "astra",
-        "luna",
-        "codex",
-    ]
+        "opus", "sonnet", "fable", "haiku", "sol", "astra", "luna",
+    ]  # fmt: skip
+    assert "ultra" not in cfg.model("luna").efforts
 
 
-def test_reading_claude_codes_catalog(home, monkeypatch):
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    read_claude.cache_clear()
-    assert read_claude() is None  # no cache yet
-    d = home / ".claude" / "cache" / "model-catalog"
-    d.mkdir(parents=True)
-    (d / "org-abc-ccd.json").write_text("{}")  # the desktop app's: ignored
-    (d / "org-abc-cc.json").write_text("not json")
-    read_claude.cache_clear()
-    assert read_claude() is None
-    (d / "org-abc-cc.json").write_text(json.dumps(CLAUDE_CATALOG))
-    read_claude.cache_clear()
-    assert [m.key for m in read_claude() or ()] == ["opus", "quick"]
-    read_claude.cache_clear()
+def test_asking_claude_falls_back_quietly(monkeypatch):
+    monkeypatch.setattr(config.shutil, "which", lambda _: None)
+    ask_claude.cache_clear()
+    assert ask_claude() is None
+
+    def run(argv, **k):
+        assert argv[1:] == ["--help"]
+        return subprocess.CompletedProcess(argv, 0, stdout=CLAUDE_HELP)
+
+    monkeypatch.setattr(config.shutil, "which", lambda _: "/bin/claude")
+    monkeypatch.setattr(config.subprocess, "run", run)
+    ask_claude.cache_clear()
+    assert ask_claude() == CLAUDE_HELP
+    ask_claude.cache_clear()
 
 
 def test_asking_codex_falls_back_quietly(monkeypatch):
@@ -275,10 +246,10 @@ args = ["--model", "opus"]
         ("haiku", "packaged"),
         ("sol", "packaged"),
         ("astra", "packaged"),
-        ("codex", "packaged"),
         ("gem", "custom"),
     ]
     assert cfg.efforts_of(cfg.model("gem")) == ["low", "max"]
+    assert cfg.efforts_of(cfg.model("opus")) == list(config.CLAUDE_EFFORTS)  # lists none
     assert cfg.replaced(cfg.builtin_models[0])
     assert cfg.model_by_display("Fable")  # hidden, but its tabs are still agent tabs
     with pytest.raises(ConfigError, match="unknown model 'luna'"):
@@ -287,6 +258,7 @@ args = ["--model", "opus"]
     assert data["hide_models"] == ["fable", "luna"]
     assert [m["key"] for m in data["models"]] == ["gem", "opus"]
     assert data["models"][0]["efforts"] == ["low", "max"]
+    assert "efforts" not in data
 
 
 def test_hiding_everything_is_refused(tmp_path):

@@ -7,6 +7,7 @@ import asyncio
 import re
 import shlex
 import shutil
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -252,7 +253,7 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         model: ModelSpec | None,
         kinds: list[str],
         taken: set[str],
-        efforts: dict[str, list[str]],
+        levels_for: Callable[[str], list[str]],
         new: bool = False,
     ) -> None:
         super().__init__()
@@ -260,7 +261,8 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         self.new = new
         self.kinds = sorted(set(kinds or AGENT_KINDS) | ({model.tool} if model else set()))
         self.taken = taken
-        self.efforts = efforts
+        self.levels_for = levels_for
+        self.auto_levels = ""  # what the efforts field was last filled with
 
     def compose(self) -> ComposeResult:
         m = self.model
@@ -294,6 +296,10 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
                     id="m-args",
                 )
             yield Static("passed to the agent; {effort} becomes the effort level", classes="hint")
+            with Horizontal(classes="row"):
+                yield Label("Efforts", classes="field")
+                yield Input(" ".join(m.efforts) if m else "", id="m-efforts")
+            yield Static("the effort levels offered, lowest first", classes="hint")
             yield Static(id="m-preview")
             yield Static(id="m-error", classes="error")
             with Horizontal(classes="buttons"):
@@ -304,7 +310,19 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         self.query_one("#m-key" if not self.model else "#m-display", Input).focus()
         if self.new:  # the key is what makes it replace the built-in
             self.query_one("#m-key", Input).disabled = True
+        if not self.model or not self.model.efforts:
+            self.fill_levels()
         self.update_preview()
+
+    @on(Select.Changed, "#m-tool")
+    def fill_levels(self) -> None:
+        """Offer the agent's usual effort levels, unless they were typed."""
+        box = self.query_one("#m-efforts", Input)
+        if box.value.strip() in ("", self.auto_levels):
+            self.auto_levels = " ".join(
+                self.levels_for(str(self.query_one("#m-tool", Select).value))
+            )
+            box.value = self.auto_levels
 
     @on(Input.Changed)
     @on(Select.Changed)
@@ -312,7 +330,7 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         spec, error = self.build()
         preview = self.query_one("#m-preview", Static)
         if spec:
-            levels = list(spec.efforts) or self.efforts.get(spec.tool) or config.FALLBACK_EFFORTS
+            levels = list(spec.efforts)
             effort = "high" if "high" in levels else levels[-1]
             argv = shlex.join([spec.tool, *spec.args_for(effort)])
             preview.update(
@@ -345,9 +363,10 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
             args = tuple(shlex.split(self.query_one("#m-args", Input).value))
         except ValueError as e:
             return None, f"arguments: {e}"
-        # A model's own effort levels (from Codex's catalog) last while its tool does.
-        keep = self.model.efforts if self.model and self.model.tool == tool else ()
-        return ModelSpec(key, str(tool), display, args, keep), ""
+        levels = tuple(_split_list(self.query_one("#m-efforts", Input).value))
+        if not levels:
+            return None, "list at least one effort level"
+        return ModelSpec(key, str(tool), display, args, levels), ""
 
     @on(Button.Pressed, "#m-save")
     def action_save(self) -> None:
@@ -418,7 +437,6 @@ class SettingsScreen(Screen[Config | None]):
         self.builtins: tuple[ModelSpec, ...] = self.orig.builtin_models
         self.custom: list[ModelSpec] = list(self.orig.custom_models)
         self.hidden: set[str] = set(self.orig.hide_models)
-        self.efforts: dict[str, list[str]] = {k: list(v) for k, v in self.orig.efforts.items()}
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
 
@@ -535,7 +553,8 @@ class SettingsScreen(Screen[Config | None]):
                 yield Static(
                     "From Claude Code and Codex on this machine, so they follow those "
                     "tools' updates; corral's packaged list stands in when one can't say. "
-                    "Hide the ones you don't use, or customize one to change it.",
+                    "Each has its own effort levels. Hide the ones you don't use, or "
+                    "customize one to change it.",
                     classes="note",
                 )
                 yield DataTable(id="builtin-table", cursor_type="row", zebra_stripes=True)
@@ -554,13 +573,6 @@ class SettingsScreen(Screen[Config | None]):
                     yield Button("Delete", id="model-delete")
                     yield Button("Move up", id="model-up")
                     yield Button("Move down", id="model-down")
-                yield Static("Effort levels per agent", classes="section")
-                yield Static(
-                    "offered when you add an agent tab, lowest first, for models "
-                    "that don't list their own",
-                    classes="note",
-                )
-                yield Vertical(id="effort-rows")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
                     yield Label("Refresh every", classes="field")
@@ -665,7 +677,6 @@ class SettingsScreen(Screen[Config | None]):
             builtin_models=self.builtins,
             custom_models=tuple(self.custom if custom is None else custom),
             hide_models=frozenset(self.hidden),
-            efforts=dict(self.efforts),
             default_agents=tuple(self.default_agents),
         )
 
@@ -858,7 +869,6 @@ class SettingsScreen(Screen[Config | None]):
         if custom is not None and self.custom:
             table.move_cursor(row=max(0, min(custom, len(self.custom) - 1)))
         self.update_hide_button()
-        self.render_effort_rows()
 
     def update_hide_button(self) -> None:
         m = self.builtin_at()
@@ -869,31 +879,6 @@ class SettingsScreen(Screen[Config | None]):
     @on(DataTable.RowHighlighted, "#builtin-table")
     def builtin_highlighted(self) -> None:
         self.update_hide_button()
-
-    def render_effort_rows(self) -> None:
-        """One effort-levels input per agent kind used by a model without
-        its own levels."""
-        self.save_effort_rows()
-        box = self.query_one("#effort-rows", Vertical)
-        box.remove_children()
-        tools = list(dict.fromkeys(m.tool for m in self.draft_config().models if not m.efforts))
-        rows = []
-        for tool in tools:
-            levels = self.efforts.get(tool) or config.FALLBACK_EFFORTS
-            rows.append(
-                Horizontal(
-                    Label(tool, classes="field"),
-                    Input(" ".join(levels), name=tool, classes="effort"),
-                    classes="row",
-                )
-            )
-        box.mount_all(rows)
-
-    def save_effort_rows(self) -> None:
-        for box in self.query("Input.effort").results(Input):
-            levels = _split_list(box.value)
-            if box.name and levels:
-                self.efforts[box.name] = levels
 
     def builtin_at(self) -> ModelSpec | None:
         table = self.query_one("#builtin-table", DataTable)
@@ -939,7 +924,6 @@ class SettingsScreen(Screen[Config | None]):
         if i is not None:
             self.edit_custom(i)
             return
-        self.save_effort_rows()
 
         def done(spec: ModelSpec | None) -> None:
             if spec:
@@ -947,11 +931,12 @@ class SettingsScreen(Screen[Config | None]):
                 self.render_models(custom=len(self.custom) - 1)
 
         taken = {c.key for c in self.custom}
-        self.app.push_screen(ModelEditor(m, self.kinds, taken, self.efforts, new=True), done)
+        self.app.push_screen(
+            ModelEditor(m, self.kinds, taken, self.draft_config().efforts_for, new=True), done
+        )
 
     @on(Button.Pressed, "#model-add")
     def model_add(self) -> None:
-        self.save_effort_rows()
 
         def done(spec: ModelSpec | None) -> None:
             if spec:
@@ -959,7 +944,9 @@ class SettingsScreen(Screen[Config | None]):
                 self.render_models(custom=len(self.custom) - 1)
 
         taken = {m.key for m in self.custom}
-        self.app.push_screen(ModelEditor(None, self.kinds, taken, self.efforts), done)
+        self.app.push_screen(
+            ModelEditor(None, self.kinds, taken, self.draft_config().efforts_for), done
+        )
 
     @on(Button.Pressed, "#model-edit")
     @on(DataTable.RowSelected, "#custom-table")
@@ -969,7 +956,6 @@ class SettingsScreen(Screen[Config | None]):
             self.edit_custom(i)
 
     def edit_custom(self, i: int) -> None:
-        self.save_effort_rows()
         old = self.custom[i]
 
         def done(spec: ModelSpec | None) -> None:
@@ -986,7 +972,9 @@ class SettingsScreen(Screen[Config | None]):
             self.render_agents()
 
         taken = {m.key for m in self.custom} - {old.key}
-        self.app.push_screen(ModelEditor(old, self.kinds, taken, self.efforts), done)
+        self.app.push_screen(
+            ModelEditor(old, self.kinds, taken, self.draft_config().efforts_for), done
+        )
 
     @on(Button.Pressed, "#model-delete")
     def model_delete(self) -> None:
@@ -1038,11 +1026,6 @@ class SettingsScreen(Screen[Config | None]):
             sizes[key] = number(f"util-{key}", title.lower(), int)
             if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
                 raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
-        self.save_effort_rows()
-        used = {m.tool for m in self.draft_config().models}
-        efforts = {
-            t: v for t, v in self.efforts.items() if t in used or t in config.DEFAULT_EFFORTS
-        }
         return replace(
             self.orig,
             root=Path(root_text).expanduser(),
@@ -1062,7 +1045,6 @@ class SettingsScreen(Screen[Config | None]):
             ),
             custom_models=tuple(self.custom),
             hide_models=frozenset(self.hidden),
-            efforts=efforts,
         )
 
     def dirty(self) -> bool:

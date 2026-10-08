@@ -9,11 +9,12 @@ Every key is optional; a missing file means all defaults. See DEFAULT_TOML
 Config back, keeping the file's comments and layout (the TUI's settings).
 
 Models are built-in or custom. The built-ins come from the agent CLIs
-installed here, read once per process: Claude Code's model catalog (the
-cache it keeps under ~/.claude) and Codex's (`codex debug models`). When one
-can't say, its packaged list (CLAUDE_MODELS, CODEX_MODELS) stands in. Custom
+installed here, asked once per process: Claude Code's model aliases (the
+packaged ones plus any its `--help` names) with the effort levels its
+`--help` lists, and the models `codex debug models` lists. When a CLI can't
+say, its packaged list (CLAUDE_MODELS, CODEX_MODELS) stands in. Custom
 models are the file's [[models]]; one with a built-in's key replaces it, and
-`hide_models` drops built-ins.
+`hide_models` drops built-ins. Each model has its own effort levels.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import shutil
 import subprocess
 import tomllib
@@ -50,10 +52,7 @@ DEFAULT_PRUNE = frozenset(
     }
 )
 
-DEFAULT_EFFORTS: dict[str, list[str]] = {
-    "claude": ["low", "medium", "high", "xhigh", "max"],
-    "codex": ["low", "medium", "high", "xhigh", "max", "ultra"],
-}
+# Effort levels for a custom model of an agent with no built-in models.
 FALLBACK_EFFORTS = ["low", "medium", "high"]
 
 
@@ -85,6 +84,9 @@ SOURCE_NAMES = {
     "custom": "custom",
 }
 CLI_TIMEOUT_S = 10
+CLAUDE_ALIASES = ("opus", "sonnet", "fable", "haiku")
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 _READ_ERRORS = (
     OSError,
     subprocess.SubprocessError,
@@ -95,35 +97,25 @@ _READ_ERRORS = (
 )
 
 
-def claude_spec(key: str, display: str, efforts=(), source: str = "packaged") -> ModelSpec:
+def claude_spec(key: str, efforts=CLAUDE_EFFORTS, source: str = "packaged") -> ModelSpec:
     # The alias ("opus") always means Claude Code's latest model of that name.
-    efforts = tuple(efforts)
-    args = ("--model", key) if efforts == ("default",) else ("--model", key, "--effort", EFFORT)
-    return ModelSpec(key, "claude", display, args, efforts, source)
+    args = ("--model", key, "--effort", EFFORT)
+    return ModelSpec(key, "claude", key.capitalize(), args, tuple(efforts), source)
 
 
 def codex_spec(
-    key: str, display: str, slug: str, efforts=(), source: str = "packaged"
+    key: str, display: str, slug: str, efforts=CODEX_EFFORTS, source: str = "packaged"
 ) -> ModelSpec:
     args = ("-m", slug, "-c", f"model_reasoning_effort={EFFORT}")
     return ModelSpec(key, "codex", display, args, tuple(efforts), source)
 
 
 # Used when Claude Code or Codex can't say which models it offers.
-CLAUDE_MODELS = (
-    claude_spec("opus", "Opus"),
-    claude_spec("sonnet", "Sonnet"),
-    claude_spec("fable", "Fable"),
-    claude_spec("haiku", "Haiku"),
-)
+CLAUDE_MODELS = tuple(claude_spec(a) for a in CLAUDE_ALIASES)
 CODEX_MODELS = (
     codex_spec("sol", "Sol", "gpt-6.1-sol"),
     codex_spec("astra", "Astra", "gpt-6-astra"),
-    codex_spec("luna", "Luna", "gpt-6-luna", ("low", "medium", "high", "xhigh", "max")),
-)
-# Whatever model the user's Codex config picks.
-CODEX_DEFAULT = ModelSpec(
-    "codex", "codex", "Codex", ("-c", f"model_reasoning_effort={EFFORT}"), (), "packaged"
+    codex_spec("luna", "Luna", "gpt-6-luna", CODEX_EFFORTS[:-1]),  # no "ultra"
 )
 
 
@@ -131,46 +123,62 @@ def _usable(key: str, display: str, taken: set[str]) -> bool:
     return bool(key) and key not in taken and not any(c in key + display for c in " /•")
 
 
-def parse_claude_catalog(data) -> tuple[ModelSpec, ...]:
-    """ModelSpecs for the models a Claude Code catalog puts in its main
-    section, by alias ("opus"), in its order. A model without effort levels
-    gets the single level "default" and no --effort."""
-    specs: list[ModelSpec] = []
-    taken: set[str] = set()
-    for m in data["catalog"]["config"]["models"]:
-        if m.get("section", "main") != "main":
-            continue
-        display = str(m.get("short_name") or "")
-        key = display.lower()
-        if not key.isalpha() or not _usable(key, display, taken):
-            continue
-        taken.add(key)
-        thinking = m.get("thinking") or {}
-        levels = [str(e["id"]) for e in thinking.get("effort_options", [])]
-        if thinking.get("type") != "effort" or not levels:
-            levels = ["default"]
-        specs.append(claude_spec(key, display, levels, "claude-code"))
-    return tuple(specs)
+def _option_help(text: str, option: str) -> str:
+    """The help text of one option in a `--help` listing: its line and the
+    wrapped lines under it, up to the next option."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(option):
+            block = [line]
+            for more in lines[i + 1 :]:
+                if more.lstrip().startswith("-") or not more.strip():
+                    break
+                block.append(more)
+            return " ".join(part.strip() for part in block)
+    return ""
 
 
-def claude_catalog_file() -> Path | None:
-    """The newest model catalog Claude Code (the CLI) has cached, if any."""
-    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
-    files = list((base / "cache" / "model-catalog").glob("*-cc.json"))
-    return max(files, key=lambda f: f.stat().st_mtime) if files else None
+def parse_claude_help(text: str) -> tuple[ModelSpec, ...]:
+    """Claude models from `claude --help`: the packaged aliases plus any
+    other alias its --model help names, each with the levels its --effort
+    help lists. Empty when the help doesn't list effort levels."""
+    levels = re.search(r"\(([a-z]+(?:, [a-z]+)+)\)", _option_help(text, "--effort"))
+    if not levels:
+        return ()
+    efforts = tuple(levels.group(1).split(", "))
+    named = re.findall(r"'([a-z]+)'", _option_help(text, "--model"))
+    aliases = list(dict.fromkeys([*CLAUDE_ALIASES, *named]))
+    return tuple(claude_spec(a, efforts, "claude-code") for a in aliases)
+
+
+def _run(*argv: str) -> str | None:
+    """A CLI's stdout, or None when it isn't installed or fails."""
+    exe = shutil.which(argv[0])
+    if not exe:
+        return None
+    try:
+        return subprocess.run(
+            [exe, *argv[1:]],
+            capture_output=True,
+            text=True,
+            timeout=CLI_TIMEOUT_S,
+            check=True,
+            stdin=subprocess.DEVNULL,
+        ).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 @functools.cache
+def claude_help() -> str | None:
+    """`claude --help`, or None when Claude Code can't say."""
+    return _run("claude", "--help")
+
+
 def claude_models() -> tuple[ModelSpec, ...] | None:
-    """The models the installed Claude Code offers, or None when it can't say.
-    Claude Code has no command that lists them, so this reads its cache."""
-    try:
-        path = claude_catalog_file()
-        if not path:
-            return None
-        return parse_claude_catalog(json.loads(path.read_text(encoding="utf-8"))) or None
-    except _READ_ERRORS:
-        return None
+    """The models the installed Claude Code offers, or None when it can't say."""
+    text = claude_help()
+    return (parse_claude_help(text) or None) if text else None
 
 
 def parse_codex_catalog(data, taken: set[str] | None = None) -> tuple[ModelSpec, ...]:
@@ -183,7 +191,7 @@ def parse_codex_catalog(data, taken: set[str] | None = None) -> tuple[ModelSpec,
         (m for m in entries if m.get("visibility", "list") == "list"),
         key=lambda m: m.get("priority", 0),
     )
-    taken = set(taken or ()) | {CODEX_DEFAULT.key}
+    taken = set(taken or ())
     specs = []
     for m in listed:
         slug = str(m["slug"])
@@ -205,20 +213,10 @@ def parse_codex_catalog(data, taken: set[str] | None = None) -> tuple[ModelSpec,
 @functools.cache
 def codex_catalog() -> dict | list | None:
     """The installed Codex's model catalog, or None when it can't say."""
-    exe = shutil.which("codex")
-    if not exe:
-        return None
+    out = _run("codex", "debug", "models")
     try:
-        out = subprocess.run(
-            [exe, "debug", "models"],
-            capture_output=True,
-            text=True,
-            timeout=CLI_TIMEOUT_S,
-            check=True,
-            stdin=subprocess.DEVNULL,
-        ).stdout
-        return json.loads(out)
-    except _READ_ERRORS:
+        return json.loads(out) if out else None
+    except ValueError:
         return None
 
 
@@ -234,10 +232,10 @@ def codex_models(taken: set[str] | None = None) -> tuple[ModelSpec, ...] | None:
 
 
 def builtin_models() -> tuple[ModelSpec, ...]:
-    """Claude Code's models, Codex's, then "codex" (Codex's own default)."""
+    """Claude Code's models, then Codex's."""
     claude = claude_models() or CLAUDE_MODELS
     codex = codex_models({m.key for m in claude}) or CODEX_MODELS
-    return (*claude, *codex, CODEX_DEFAULT)
+    return (*claude, *codex)
 
 
 PERCENT_MIN, PERCENT_MAX = 10, 90
@@ -274,7 +272,6 @@ class Config:
     builtin_models: tuple[ModelSpec, ...] = field(default_factory=lambda: builtin_models())
     custom_models: tuple[ModelSpec, ...] = ()  # the file's [[models]]
     hide_models: frozenset[str] = frozenset()  # built-ins not offered
-    efforts: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_EFFORTS))
     path: Path | None = None  # file it was loaded from, if any
 
     @property
@@ -314,7 +311,10 @@ class Config:
         return (*self.models, *hidden)
 
     def efforts_for(self, tool: str) -> list[str]:
-        return self.efforts.get(tool, FALLBACK_EFFORTS)
+        """Effort levels for a model of `tool` that lists none: those of the
+        tool's first built-in model."""
+        first = next((m for m in self.builtin_models if m.tool == tool and m.efforts), None)
+        return list(first.efforts) if first else list(FALLBACK_EFFORTS)
 
     def efforts_of(self, model: ModelSpec) -> list[str]:
         """The model's own effort levels, else its tool's."""
@@ -438,10 +438,6 @@ def from_dict(data: dict) -> Config:
     if not cfg.models:
         raise ConfigError("models: at least one model is required")
 
-    if "efforts" in data:
-        eff = _expect(data, "efforts", dict)
-        cfg.efforts = {**DEFAULT_EFFORTS, **{k: list(v) for k, v in eff.items()}}
-
     for spec in cfg.default_agents:
         cfg.model(spec.partition("/")[0])  # fail early on a bad default
     return cfg
@@ -478,7 +474,6 @@ def to_data(cfg: Config) -> dict:
             "top_percent": u.top_percent,
             "bottom_left_percent": u.bottom_left_percent,
         },
-        "efforts": {tool: list(levels) for tool, levels in cfg.efforts.items()},
         "models": [_model_data(m) for m in cfg.custom_models],
         "hide_models": sorted(cfg.hide_models),
     }
@@ -610,22 +605,19 @@ bottom_right = "lazygit"
 top_percent = 50
 bottom_left_percent = 35
 
-# Effort levels offered per agent tool (herdr agent kind), for models that
-# don't bring their own: built-in models use the levels their CLI lists.
-[efforts]
-claude = ["low", "medium", "high", "xhigh", "max"]
-codex = ["low", "medium", "high", "xhigh", "max", "ultra"]
-
-# Built-in models come from the agent CLIs installed here: Claude Code's model
-# catalog and Codex's (`codex debug models`), or corral's packaged list when
-# one can't say. `corral models` lists them. Hide the ones you don't want:
+# Built-in models come from the agent CLIs installed here, each with its own
+# effort levels: Claude Code's aliases (opus, sonnet, fable, haiku and any
+# other its --help names) and the models `codex debug models` lists, or
+# corral's packaged list when one can't say. `corral models` lists them.
+# Hide the ones you don't want:
 # hide_models = ["5.6-sol", "terra"]
 
 # Custom models, added to the built-ins; one with a built-in's key replaces
 # it. `tool` is the herdr agent kind (claude, codex, gemini, opencode, ...).
 # `key` is what you type (`corral tab gem/high`), `display` prefixes the tab
 # label ("Gemini•high"), and `args` go to the agent binary with {effort}
-# substituted. `efforts`, optional, replaces the tool's levels for one model.
+# substituted. `efforts` are the levels offered, lowest first; without it, a
+# model gets those of its agent's first built-in model.
 #
 # [[models]]
 # key = "gem"

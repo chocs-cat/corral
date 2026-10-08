@@ -112,20 +112,20 @@ ask before running it.
 
 `corral models --json` lists the models, each with its `source` and effort
 levels; check it rather than guessing a key. Built-in models come from the
-installed CLIs (`claude-code`: Claude Code's cached model catalog; `codex`:
-`codex debug models`), or from corral's `packaged` list when a CLI can't
-say. For Codex, the newest of each family has the short key (`sol`,
-`astra`, `luna`), older ones keep their version (`5.6-sol`), and `codex`
-runs Codex's own default model. Effort levels differ by model (Luna has no
-`ultra`).
+installed CLIs (`claude-code`: the aliases `opus`, `sonnet`, `fable`,
+`haiku` and any other `claude --help` names, with its effort levels;
+`codex`: `codex debug models`), or from corral's `packaged` list when a CLI
+can't say. For Codex, the newest of each family has the short key (`sol`,
+`astra`, `luna`) and older ones keep their version (`5.6-sol`). Effort
+levels differ by model (Luna has no `ultra`).
 
 Built-ins update themselves, so don't copy them into the file. To drop one,
 add its key to `hide_models`. To add a model, add a `[[models]]` entry (a
 `custom` model) with `key`, `tool` (the herdr agent kind: claude, codex,
 gemini, opencode, …), `display` and `args` (`{effort}` is substituted), and
-optionally `efforts` for its own levels. A custom model with a built-in's key
-replaces that built-in. Effort levels per tool, for models without their
-own, are under `[efforts]`.
+`efforts` for its levels (without it, those of its agent's first built-in
+model). A custom model with a built-in's key replaces that built-in. The old
+`[efforts]` table is no longer read.
 
 ## Prompting an agent later
 

@@ -147,7 +147,9 @@ async def test_model_editor_adds_and_edits(app, cfg_path):
     assert [m["key"] for m in data["models"]] == ["gem", "son"]
     assert data["models"][0]["args"] == ["--model", "pro", "--effort", "{effort}"]
     assert data["default_agents"] == ["son/medium"]
-    assert "gemini" in data["efforts"]
+    assert data["models"][0]["efforts"] == config.FALLBACK_EFFORTS  # no built-in gemini model
+    assert data["models"][1]["efforts"] == list(config.CLAUDE_EFFORTS)  # Sonnet's
+    assert "efforts" not in data
     assert "hide_models" not in data
 
 

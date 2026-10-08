@@ -153,9 +153,6 @@ bottom_right = "lazygit"
 top_percent = 50                    # the top pane's share of the height
 bottom_left_percent = 35            # the bottom-left pane's share of the bottom row
 
-[efforts]                           # for models that don't list their own
-claude = ["low", "medium", "high", "xhigh", "max"]
-
 hide_models = ["5.6-sol"]           # built-in models you don't want offered
 
 [[models]]                          # a custom model; any herdr agent kind
@@ -163,7 +160,7 @@ key = "gem"
 tool = "gemini"
 display = "Gemini"
 args = ["--model", "gemini-3-pro"]
-efforts = ["default"]               # optional: this model's own levels
+efforts = ["low", "high"]           # the levels offered, lowest first
 ```
 
 ### Models
@@ -171,21 +168,20 @@ efforts = ["default"]               # optional: this model's own levels
 **Built-in models** come from the agent CLIs installed on the machine, so
 they keep up with new releases without a corral update:
 
-- **Claude Code**: the models in the main section of its model picker, by
-  alias (`opus`, `sonnet`, `fable`, `haiku`), with their effort levels.
-  Claude Code has no command that lists them, so corral reads the catalog it
-  caches under `~/.claude/cache/model-catalog` (or `$CLAUDE_CONFIG_DIR`).
-- **Codex**: the models `codex debug models` lists, with their effort
+- **Claude Code**: its model aliases, `opus`, `sonnet`, `fable` and `haiku`
+  (each always means the latest model of that name), plus any other alias
+  `claude --help` names, with the effort levels `claude --help` lists.
+- **Codex**: the models `codex debug models` lists, each with its own effort
   levels. The newest of each family gets the short key (`sol`, `astra`,
   `luna`); older ones keep their version (`5.6-sol`).
-- `codex`: whatever model your Codex config picks.
 
-When a CLI isn't installed or its catalog can't be read, corral's packaged
-list stands in: Opus, Sonnet, Fable and Haiku; GPT-6.1 Sol, GPT-6 Astra and
+When a CLI isn't installed or can't be read, corral's packaged list stands
+in: the same Claude aliases with `low` to `max`; GPT-6.1 Sol, GPT-6 Astra and
 GPT-6 Luna. `hide_models` drops built-ins you don't use.
 
 **Custom models** are the file's `[[models]]`, offered after the built-ins.
-One with a built-in's key replaces that built-in. `corral models` shows
+One with a built-in's key replaces that built-in. A custom model's `efforts`
+default to those of its agent's first built-in model. `corral models` shows
 where each model comes from; the settings screen's Models tab lists the two
 kinds separately.
 

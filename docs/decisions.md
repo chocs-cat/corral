@@ -145,15 +145,26 @@ installer runs in the user's terminal, so sudo and confirmation prompts work.
 
 corral's models are built-in or custom. The built-ins are read, once per
 process, from the agent CLIs installed on the machine, so they follow new
-releases without a corral release: Claude Code's main-section models by
-alias, from the model catalog it caches under `~/.claude/cache/model-catalog`
-(it has no command that lists them), and the models `codex debug models`
-lists, each with its own effort levels. Neither source is a documented
-interface, so each falls back to a packaged list (Opus, Sonnet, Fable,
-Haiku; GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna) when it is missing or can't be
-read. For Codex, the first model of each family gets the short key (`sol`);
-later ones keep their version (`5.6-sol`). `codex` (Codex's own default
-model) is always offered.
+releases without a corral release.
+
+- Claude Code has no command that lists its models. corral ships its
+  aliases (`opus`, `sonnet`, `fable`, `haiku`: each always the latest model
+  of that name), adds any other alias `claude --help` names, and takes the
+  effort levels from `claude --help`. Reading the model catalog Claude Code
+  caches under `~/.claude` would give per-model levels and every model, but
+  it is a private cache; the help text and the aliases were judged the more
+  stable inputs.
+- Codex: the models `codex debug models` lists, each with its own levels.
+  The first model of each family gets the short key (`sol`); later ones
+  keep their version (`5.6-sol`).
+
+When a CLI is missing or can't be read, a packaged list stands in (the
+Claude aliases with `low` to `max`; GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna).
+There is no generic "codex" model for Codex's own default.
+
+Every model has its own effort levels; the per-agent `[efforts]` table is
+gone. A custom model without `efforts` gets those of its agent's first
+built-in model, else `low medium high`.
 
 Custom models are the file's `[[models]]`. They are added after the
 built-ins rather than replacing the list, and one with a built-in's key
