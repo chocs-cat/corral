@@ -303,7 +303,7 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
         spec, error = self.build()
         preview = self.query_one("#m-preview", Static)
         if spec:
-            levels = self.efforts.get(spec.tool) or config.FALLBACK_EFFORTS
+            levels = list(spec.efforts) or self.efforts.get(spec.tool) or config.FALLBACK_EFFORTS
             effort = "high" if "high" in levels else levels[-1]
             argv = shlex.join([spec.tool, *spec.args_for(effort)])
             preview.update(
@@ -336,7 +336,9 @@ class ModelEditor(ModalScreen[ModelSpec | None]):
             args = tuple(shlex.split(self.query_one("#m-args", Input).value))
         except ValueError as e:
             return None, f"arguments: {e}"
-        return ModelSpec(key, str(tool), display, args), ""
+        # A model's own effort levels (from Codex's catalog) last while its tool does.
+        keep = self.model.efforts if self.model and self.model.tool == tool else ()
+        return ModelSpec(key, str(tool), display, args, keep), ""
 
     @on(Button.Pressed, "#m-save")
     def action_save(self) -> None:
@@ -514,7 +516,8 @@ class SettingsScreen(Screen[Config | None]):
             with TabPane("Models", id="tab-models"):
                 yield Static(
                     "The models you can open agent tabs with. Tabs are named "
-                    "<tab name>•<effort>, e.g. Opus•high.",
+                    "<tab name>•<effort>, e.g. Opus•high. Until you change this "
+                    "list, the Codex models are the ones your installed Codex offers.",
                     classes="note",
                 )
                 yield DataTable(id="model-table", cursor_type="row", zebra_stripes=True)

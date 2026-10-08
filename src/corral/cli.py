@@ -6,7 +6,7 @@
     corral stop TARGET... ...   stop agents
     corral close WS... ...      close whole workspaces
     corral ls ...               projects, their workspaces and agents
-    corral models               the model matrix
+    corral models               the models and their effort levels
     corral tools [install]      the utility tab's programs; install yazi/lazygit
     corral config path|init|show
 
@@ -229,7 +229,7 @@ def cmd_models(ctx: Ctx) -> int:
         print(
             json.dumps(
                 {
-                    "models": [asdict(m) for m in cfg.models],
+                    "models": [{**asdict(m), "efforts": cfg.efforts_of(m)} for m in cfg.models],
                     "efforts": {m.tool: cfg.efforts_for(m.tool) for m in cfg.models},
                 },
                 indent=2,
@@ -238,7 +238,7 @@ def cmd_models(ctx: Ctx) -> int:
         return EXIT_OK
     print(f"{'key':<10} {'tool':<8} {'display':<10} efforts / args")
     for m in cfg.models:
-        print(f"{m.key:<10} {m.tool:<8} {m.display:<10} {'|'.join(cfg.efforts_for(m.tool))}")
+        print(f"{m.key:<10} {m.tool:<8} {m.display:<10} {'|'.join(cfg.efforts_of(m))}")
         print(f"{'':<30} {' '.join(m.args)}")
     return EXIT_OK
 
@@ -444,7 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--open", action="store_true", help="only projects with a workspace")
     ls.set_defaults(func=cmd_ls)
 
-    md = sub.add_parser("models", parents=[common], help="print the model matrix")
+    md = sub.add_parser("models", parents=[common], help="list the models and their effort levels")
     md.set_defaults(func=cmd_models)
 
     tl = sub.add_parser(

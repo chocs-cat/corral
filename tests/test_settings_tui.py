@@ -126,7 +126,16 @@ async def test_model_editor_adds_and_edits(app, cfg_path):
         await pilot.press("ctrl+s")
         await settle(pilot, app)
     data = saved(cfg_path)
-    assert [m["key"] for m in data["models"]] == ["son", "opus", "haiku", "codex", "gem"]
+    assert [m["key"] for m in data["models"]] == [
+        "son",
+        "opus",
+        "haiku",
+        "sol",
+        "astra",
+        "luna",
+        "codex",
+        "gem",
+    ]
     assert data["models"][-1]["args"] == ["--model", "pro", "--effort", "{effort}"]
     assert data["default_agents"] == ["son/medium"]
     assert "gemini" in data["efforts"]

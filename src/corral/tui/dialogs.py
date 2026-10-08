@@ -54,7 +54,7 @@ class AgentPicker(ModalScreen[str | None]):
             return
         self.model = self.cfg.model(event.option.id)
         efforts = self.query_one("#efforts", OptionList)
-        levels = self.cfg.efforts_for(self.model.tool)
+        levels = self.cfg.efforts_of(self.model)
         efforts.clear_options()
         efforts.add_options([Option(labels.tab_label(self.model.display, e), id=e) for e in levels])
         efforts.highlighted = levels.index("medium") if "medium" in levels else 0

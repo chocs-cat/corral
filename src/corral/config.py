@@ -7,11 +7,19 @@ too, deliberately -- not ~/Library/Application Support.
 Every key is optional; a missing file means all defaults. See DEFAULT_TOML
 (written by `corral config init`) for the documented shape. `save` writes a
 Config back, keeping the file's comments and layout (the TUI's settings).
+
+The default Codex models come from the installed Codex's own catalog
+(`codex debug models`), read once per process; without Codex, or if its
+output can't be read, corral uses the packaged CODEX_MODELS instead.
 """
 
 from __future__ import annotations
 
+import functools
+import json
 import os
+import shutil
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +49,7 @@ DEFAULT_PRUNE = frozenset(
 
 DEFAULT_EFFORTS: dict[str, list[str]] = {
     "claude": ["low", "medium", "high", "xhigh", "max"],
-    "codex": ["minimal", "low", "medium", "high", "xhigh"],
+    "codex": ["low", "medium", "high", "xhigh", "max", "ultra"],
 }
 FALLBACK_EFFORTS = ["low", "medium", "high"]
 
@@ -56,17 +64,93 @@ class ModelSpec:
     tool: str  # herdr agent kind: "claude", "codex", ...
     display: str  # tab label prefix: "Sonnet"
     args: tuple[str, ...]  # agent args; "{effort}" is substituted
+    efforts: tuple[str, ...] = ()  # this model's levels; () = the tool's
 
     def args_for(self, effort: str) -> list[str]:
         return [a.replace(EFFORT, effort) for a in self.args]
 
 
-DEFAULT_MODELS = (
+CLAUDE_MODELS = (
     ModelSpec("sonnet", "claude", "Sonnet", ("--model", "sonnet", "--effort", EFFORT)),
     ModelSpec("opus", "claude", "Opus", ("--model", "opus", "--effort", EFFORT)),
     ModelSpec("haiku", "claude", "Haiku", ("--model", "haiku", "--effort", EFFORT)),
-    ModelSpec("codex", "codex", "Codex", ("-c", f"model_reasoning_effort={EFFORT}")),
 )
+
+
+def codex_spec(key: str, display: str, slug: str, efforts=()) -> ModelSpec:
+    args = ("-m", slug, "-c", f"model_reasoning_effort={EFFORT}")
+    return ModelSpec(key, "codex", display, args, tuple(efforts))
+
+
+# Used when the installed Codex can't say which models it offers.
+CODEX_MODELS = (
+    codex_spec("sol", "Sol", "gpt-6.1-sol"),
+    codex_spec("astra", "Astra", "gpt-6-astra"),
+    codex_spec("luna", "Luna", "gpt-6-luna", ("low", "medium", "high", "xhigh", "max")),
+)
+# Whatever model the user's Codex config picks.
+CODEX_DEFAULT = ModelSpec("codex", "codex", "Codex", ("-c", f"model_reasoning_effort={EFFORT}"))
+CODEX_TIMEOUT_S = 10
+
+
+def parse_codex_catalog(data) -> tuple[ModelSpec, ...]:
+    """ModelSpecs for the models a `codex debug models` catalog lists (not
+    the hidden ones), in Codex's order. Each family's first model gets the
+    short name ("sol", "Sol"); later ones keep their version ("5.6-sol",
+    "5.6-Sol")."""
+    entries = data["models"] if isinstance(data, dict) else data
+    listed = sorted(
+        (m for m in entries if m.get("visibility", "list") == "list"),
+        key=lambda m: m.get("priority", 0),
+    )
+    taken = {m.key for m in CLAUDE_MODELS} | {CODEX_DEFAULT.key}
+    specs = []
+    for m in listed:
+        slug = str(m["slug"])
+        name = slug.removeprefix("gpt-")
+        family = name.rsplit("-", 1)[-1]
+        if family.isalpha() and family not in taken:
+            key, display = family, family.capitalize()
+        else:
+            key = name
+            display = str(m.get("display_name") or name).removeprefix("GPT-")
+        if key in taken or any(c in key for c in " /•") or any(c in display for c in "/•"):
+            continue
+        taken.add(key)
+        levels = [str(e["effort"]) for e in m.get("supported_reasoning_levels", [])]
+        specs.append(codex_spec(key, display, slug, levels))
+    return tuple(specs)
+
+
+@functools.cache
+def codex_models() -> tuple[ModelSpec, ...] | None:
+    """The models the installed Codex offers, or None when it can't say."""
+    exe = shutil.which("codex")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "debug", "models"],
+            capture_output=True,
+            text=True,
+            timeout=CODEX_TIMEOUT_S,
+            check=True,
+            stdin=subprocess.DEVNULL,
+        ).stdout
+        return parse_codex_catalog(json.loads(out)) or None
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        LookupError,
+        TypeError,
+        AttributeError,
+    ):
+        return None
+
+
+def default_models() -> tuple[ModelSpec, ...]:
+    return (*CLAUDE_MODELS, *(codex_models() or CODEX_MODELS), CODEX_DEFAULT)
 
 
 PERCENT_MIN, PERCENT_MAX = 10, 90
@@ -100,7 +184,7 @@ class Config:
     refresh_seconds: float = 3.0
     agent_timeout_ms: int = 60000
     utility: Utility = field(default_factory=Utility)
-    models: tuple[ModelSpec, ...] = DEFAULT_MODELS
+    models: tuple[ModelSpec, ...] = field(default_factory=lambda: default_models())
     efforts: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_EFFORTS))
     path: Path | None = None  # file it was loaded from, if any
 
@@ -117,6 +201,10 @@ class Config:
 
     def efforts_for(self, tool: str) -> list[str]:
         return self.efforts.get(tool, FALLBACK_EFFORTS)
+
+    def efforts_of(self, model: ModelSpec) -> list[str]:
+        """The model's own effort levels, else its tool's."""
+        return list(model.efforts) or self.efforts_for(model.tool)
 
 
 def config_path() -> Path:
@@ -213,12 +301,16 @@ def from_dict(data: dict) -> Config:
             args = m.get("args", [])
             if isinstance(args, str):
                 args = args.split()
+            levels = m.get("efforts", [])
+            if not isinstance(levels, list):
+                raise ConfigError(f"{where}efforts: expected array")
             models.append(
                 ModelSpec(
                     key=str(m["key"]),
                     tool=str(m["tool"]),
                     display=str(m["display"]),
                     args=tuple(str(a) for a in args),
+                    efforts=tuple(str(e) for e in levels),
                 )
             )
         keys = [m.key for m in models]
@@ -270,16 +362,20 @@ def to_data(cfg: Config) -> dict:
             "bottom_left_percent": u.bottom_left_percent,
         },
         "efforts": {tool: list(levels) for tool, levels in cfg.efforts.items()},
-        "models": [
-            {"key": m.key, "tool": m.tool, "display": m.display, "args": list(m.args)}
-            for m in cfg.models
-        ],
+        "models": [_model_data(m) for m in cfg.models],
     }
     if cfg.prune != DEFAULT_PRUNE:
         if cfg.prune > DEFAULT_PRUNE:
             data["prune_extra"] = sorted(cfg.prune - DEFAULT_PRUNE)
         else:
             data["prune"] = sorted(cfg.prune)
+    return data
+
+
+def _model_data(m: ModelSpec) -> dict:
+    data = {"key": m.key, "tool": m.tool, "display": m.display, "args": list(m.args)}
+    if m.efforts:
+        data["efforts"] = list(m.efforts)
     return data
 
 
@@ -396,33 +492,28 @@ bottom_left_percent = 35
 # Effort levels offered per agent tool (herdr agent kind).
 [efforts]
 claude = ["low", "medium", "high", "xhigh", "max"]
-codex = ["minimal", "low", "medium", "high", "xhigh"]
+codex = ["low", "medium", "high", "xhigh", "max", "ultra"]
 
-# The model matrix. `tool` is the herdr agent kind (claude, codex, gemini,
-# opencode, ...). `key` is what you type (`corral tab opus/high`), `display`
-# prefixes the tab label ("Opus•high"), and `args` go to the agent binary
-# with {effort} substituted. Defining any [[models]] replaces the defaults.
-[[models]]
-key = "sonnet"
-tool = "claude"
-display = "Sonnet"
-args = ["--model", "sonnet", "--effort", "{effort}"]
-
-[[models]]
-key = "opus"
-tool = "claude"
-display = "Opus"
-args = ["--model", "opus", "--effort", "{effort}"]
-
-[[models]]
-key = "haiku"
-tool = "claude"
-display = "Haiku"
-args = ["--model", "haiku", "--effort", "{effort}"]
-
-[[models]]
-key = "codex"
-tool = "codex"
-display = "Codex"
-args = ["-c", "model_reasoning_effort={effort}"]
+# The model matrix. Left out, it is Sonnet, Opus and Haiku, the models your
+# installed Codex offers (`codex debug models`; GPT-6 Sol, Astra and Luna if
+# Codex can't say), and "codex" for whatever model your Codex config picks.
+# `corral models` lists them. Defining any [[models]] replaces that list.
+#
+# `tool` is the herdr agent kind (claude, codex, gemini, opencode, ...).
+# `key` is what you type (`corral tab opus/high`), `display` prefixes the tab
+# label ("Opus•high"), and `args` go to the agent binary with {effort}
+# substituted. `efforts`, optional, replaces the tool's levels for one model.
+#
+# [[models]]
+# key = "opus"
+# tool = "claude"
+# display = "Opus"
+# args = ["--model", "opus", "--effort", "{effort}"]
+#
+# [[models]]
+# key = "luna"
+# tool = "codex"
+# display = "Luna"
+# args = ["-m", "gpt-6-luna", "-c", "model_reasoning_effort={effort}"]
+# efforts = ["low", "medium", "high", "xhigh", "max"]
 """

@@ -8,7 +8,7 @@ Round up your projects into [herdr](https://herdr.dev) workspaces.
 corral sets up a herdr workspace for any project under a root directory. Each
 workspace gets a utility tab (file manager, shell and git UI by default) and
 one or more agent tabs, each named for the model and effort it runs:
-`Sonnet•medium`, `Opus•high`, `Codex•xhigh`. Use the TUI to browse projects
+`Sonnet•medium`, `Opus•high`, `Sol•xhigh`. Use the TUI to browse projects
 and act with single keys, or the CLI (with `--json`) for scripts and coding
 agents.
 
@@ -83,13 +83,13 @@ It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 ```sh
 corral                                  # the TUI
 corral up ~/Code/api                    # build the workspace, or focus it if it exists
-corral up ~/Code/api --agent opus/high --agent codex/xhigh
+corral up ~/Code/api --agent opus/high --agent sol/xhigh
 corral tab opus/high                    # an agent tab in the workspace you're in
 corral tab sonnet --new                 # another one: Sonnet•medium-2
 corral stop "Opus•high"                 # by tab label, agent name or pane id
 corral close courses --dry-run          # what closing would take with it
 corral ls                               # projects, workspaces, agents
-corral models                           # the model matrix
+corral models                           # the models and their effort levels
 ```
 
 Every command takes `--json`: the result goes to stdout as JSON, progress to
@@ -161,7 +161,16 @@ key = "opus"
 tool = "claude"
 display = "Opus"
 args = ["--model", "opus", "--effort", "{effort}"]
+# efforts = ["low", "high"]         # this model's levels, instead of the tool's
 ```
+
+Without `[[models]]`, corral offers Sonnet, Opus and Haiku, then the models
+your installed Codex lists (`codex debug models`) with each one's own effort
+levels, then `codex` for whatever model your Codex config picks. The first
+model of each family gets the short name (`sol`, `astra`, `luna`); older ones
+keep their version (`5.6-sol`). If Codex isn't installed or its catalog can't
+be read, corral uses its packaged list: GPT-6.1 Sol, GPT-6 Astra and GPT-6
+Luna. Defining any `[[models]]` replaces all of this.
 
 ## Agent skill
 

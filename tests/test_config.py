@@ -1,3 +1,5 @@
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,7 +32,15 @@ def test_default_toml_round_trips(tmp_path, monkeypatch):
     f.write_text(config.DEFAULT_TOML)
     cfg = config.load(f)
     assert cfg.path == f
-    assert [m.key for m in cfg.models] == ["sonnet", "opus", "haiku", "codex"]
+    assert [m.key for m in cfg.models] == [
+        "sonnet",
+        "opus",
+        "haiku",
+        "sol",
+        "astra",
+        "luna",
+        "codex",
+    ]
     assert cfg.utility.top == "yazi"
     assert (cfg.utility.top_percent, cfg.utility.bottom_left_percent) == (50, 35)
 
@@ -93,3 +103,80 @@ def test_utility_sizes(tmp_path):
         f.write_text(f"[utility]\ntop_percent = {bad}\n")
         with pytest.raises(ConfigError, match="top_percent"):
             config.load_file(f)
+
+
+ask_codex = config.codex_models  # the real one; conftest stubs it out per test
+
+CATALOG = {
+    "models": [
+        {
+            "slug": "gpt-6-luna",
+            "display_name": "GPT-6-Luna",
+            "visibility": "list",
+            "priority": 4,
+            "supported_reasoning_levels": [{"effort": "low"}, {"effort": "max"}],
+        },
+        {
+            "slug": "gpt-6.1-sol",
+            "display_name": "GPT-6.1-Sol",
+            "visibility": "list",
+            "priority": 1,
+            "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}],
+        },
+        {"slug": "gpt-6-sol", "display_name": "GPT-6-Sol", "visibility": "list", "priority": 3},
+        {"slug": "gpt-reserve", "display_name": "GPT-Reserve", "visibility": "hide", "priority": 2},
+    ]
+}
+
+
+def test_codex_catalog_becomes_models():
+    specs = config.parse_codex_catalog(CATALOG)
+    assert [(m.key, m.display) for m in specs] == [
+        ("sol", "Sol"),
+        ("6-sol", "6-Sol"),
+        ("luna", "Luna"),
+    ]
+    assert specs[0].args_for("high") == ["-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high"]
+    assert specs[2].efforts == ("low", "max")
+
+
+def test_default_models_come_from_codex(monkeypatch):
+    monkeypatch.setattr(config, "codex_models", lambda: config.parse_codex_catalog(CATALOG))
+    cfg = config.Config()
+    keys = [m.key for m in cfg.models]
+    assert keys == ["sonnet", "opus", "haiku", "sol", "6-sol", "luna", "codex"]
+    assert cfg.efforts_of(cfg.model("luna")) == ["low", "max"]
+    assert cfg.efforts_of(cfg.model("codex")) == config.DEFAULT_EFFORTS["codex"]
+
+
+def test_asking_codex_falls_back_quietly(monkeypatch):
+    monkeypatch.setattr(config.shutil, "which", lambda _: None)
+    ask_codex.cache_clear()
+    assert ask_codex() is None
+
+    def run(*a, **k):
+        return subprocess.CompletedProcess(a, 0, stdout="not json")
+
+    monkeypatch.setattr(config.shutil, "which", lambda _: "/bin/codex")
+    monkeypatch.setattr(config.subprocess, "run", run)
+    ask_codex.cache_clear()
+    assert ask_codex() is None
+    assert [m.key for m in config.Config().models][3:] == ["sol", "astra", "luna", "codex"]
+
+    def run_ok(*a, **k):
+        return subprocess.CompletedProcess(a, 0, stdout=json.dumps(CATALOG))
+
+    monkeypatch.setattr(config.subprocess, "run", run_ok)
+    ask_codex.cache_clear()
+    assert [m.key for m in ask_codex() or ()] == ["sol", "6-sol", "luna"]
+    ask_codex.cache_clear()
+
+
+def test_model_efforts_round_trip(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text(
+        'default_agents=["l/low"]\n[[models]]\nkey="l"\ntool="codex"\ndisplay="L"\nefforts=["low","max"]\n'
+    )
+    cfg = config.load_file(f)
+    assert cfg.efforts_of(cfg.model("l")) == ["low", "max"]
+    assert config.to_data(cfg)["models"][0]["efforts"] == ["low", "max"]

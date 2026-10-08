@@ -140,3 +140,16 @@ shell. corral explains what each does and installs them when asked
 (`corral tools install`, or the settings screen's Install buttons), using the
 first of Homebrew, pacman or (lazygit only) `go install` that it finds. The
 installer runs in the user's terminal, so sudo and confirmation prompts work.
+
+## Default Codex models come from the installed Codex (2026-10)
+
+With no `[[models]]` in the config, corral reads `codex debug models` once
+per process and offers the models it lists (not the hidden ones), in Codex's
+order, each with its own effort levels. The first model of each family gets
+the short key (`sol`); later ones keep their version (`5.6-sol`). This keeps
+the list current without a corral release, at the cost of relying on a
+`debug` subcommand whose format isn't promised: if Codex is missing or its
+output can't be read, corral falls back to a packaged list (GPT-6.1 Sol,
+GPT-6 Astra, GPT-6 Luna). `codex` (Codex's own default model) is always
+offered. `corral config init` leaves `[[models]]` commented out so a new file
+doesn't freeze the list.

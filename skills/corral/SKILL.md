@@ -110,9 +110,18 @@ says whether yazi and lazygit are installed and how corral would install them;
 go. It installs software on the user's machine (pacman runs under sudo), so
 ask before running it.
 
+`corral models --json` lists the models and each one's effort levels; check
+it rather than guessing a key. With no `[[models]]` in the file, the Codex
+models come from the installed Codex (`codex debug models`): the newest of
+each family has the short key (`sol`, `astra`, `luna`), older ones keep their
+version (`5.6-sol`), and `codex` runs Codex's own default model. Luna has no
+`ultra` effort.
+
 To add a model, add a `[[models]]` entry with `key`, `tool` (the herdr agent
 kind: claude, codex, gemini, opencode, …), `display` and `args` (`{effort}` is
-substituted). Effort levels per tool are under `[efforts]`.
+substituted), and optionally `efforts` for that model's own levels. Any
+`[[models]]` entry replaces the whole default list. Effort levels per tool
+are under `[efforts]`.
 
 ## Prompting an agent later
 
