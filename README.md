@@ -8,7 +8,7 @@ Round up your projects into [herdr](https://herdr.dev) workspaces.
 corral sets up a herdr workspace for any project under a root directory. Each
 workspace gets a utility tab (file manager, shell and git UI by default) and
 one or more agent tabs, each named for the model and effort it runs:
-`Sonnet•medium`, `Opus•high`, `Codex•xhigh`. Use the TUI to browse projects
+`Sonnet•medium`, `Opus•high`, `Sol•xhigh`. Use the TUI to browse projects
 and act with single keys, or the CLI (with `--json`) for scripts and coding
 agents.
 
@@ -83,13 +83,13 @@ It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 ```sh
 corral                                  # the TUI
 corral up ~/Code/api                    # build the workspace, or focus it if it exists
-corral up ~/Code/api --agent opus/high --agent codex/xhigh
+corral up ~/Code/api --agent opus/high --agent sol/xhigh
 corral tab opus/high                    # an agent tab in the workspace you're in
 corral tab sonnet --new                 # another one: Sonnet•medium-2
 corral stop "Opus•high"                 # by tab label, agent name or pane id
 corral close courses --dry-run          # what closing would take with it
 corral ls                               # projects, workspaces, agents
-corral models                           # the model matrix
+corral models                           # the models and their effort levels
 ```
 
 Every command takes `--json`: the result goes to stdout as JSON, progress to
@@ -153,15 +153,37 @@ bottom_right = "lazygit"
 top_percent = 50                    # the top pane's share of the height
 bottom_left_percent = 35            # the bottom-left pane's share of the bottom row
 
-[efforts]
-claude = ["low", "medium", "high", "xhigh", "max"]
+hide_models = ["5.6-sol"]           # built-in models you don't want offered
 
-[[models]]                          # any herdr agent kind: claude, codex, gemini, opencode, ...
-key = "opus"
-tool = "claude"
-display = "Opus"
-args = ["--model", "opus", "--effort", "{effort}"]
+[[models]]                          # a custom model; any herdr agent kind
+key = "gem"
+tool = "gemini"
+display = "Gemini"
+args = ["--model", "gemini-3-pro"]
+efforts = ["low", "high"]           # the levels offered, lowest first
 ```
+
+### Models
+
+**Built-in models** come from the agent CLIs installed on the machine, so
+they keep up with new releases without a corral update:
+
+- **Claude Code**: its model aliases, `opus`, `sonnet`, `fable` and `haiku`
+  (each always means the latest model of that name), plus any other alias
+  `claude --help` names, with the effort levels `claude --help` lists.
+- **Codex**: the models `codex debug models` lists, each with its own effort
+  levels. The newest of each family gets the short key (`sol`, `astra`,
+  `luna`); older ones keep their version (`5.6-sol`).
+
+When a CLI isn't installed or can't be read, corral's packaged list stands
+in: the same Claude aliases with `low` to `max`; GPT-6.1 Sol, GPT-6 Astra and
+GPT-6 Luna. `hide_models` drops built-ins you don't use.
+
+**Custom models** are the file's `[[models]]`, offered after the built-ins.
+One with a built-in's key replaces that built-in. A custom model's `efforts`
+default to those of its agent's first built-in model. `corral models` shows
+where each model comes from; the settings screen's Models tab lists the two
+kinds separately.
 
 ## Agent skill
 

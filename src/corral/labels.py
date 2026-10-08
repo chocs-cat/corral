@@ -11,7 +11,14 @@ import re
 from dataclasses import dataclass
 
 BULLET = "•"
-EFFORT_SHORT = {"minimal": "min", "low": "lo", "medium": "med", "high": "hi", "xhigh": "xhi"}
+EFFORT_SHORT = {
+    "minimal": "min",
+    "low": "lo",
+    "medium": "med",
+    "high": "hi",
+    "xhigh": "xhi",
+    "ultra": "ult",
+}
 
 _RIGHT = re.compile(r"(.+?)(?:-(\d+))?")
 _SPACED = re.compile(r"\s*" + BULLET + r"\s*")

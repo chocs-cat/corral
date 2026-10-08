@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from corral import config
 from corral.config import Config, Utility
 from tests.fake_herdr import FakeHerdr
 
@@ -43,6 +44,14 @@ def root(tmp_path: Path) -> Path:
 def cfg(root: Path) -> Config:
     # Utility commands that certainly exist, so tests don't depend on yazi.
     return Config(root=root, utility=Utility(top="true", bottom_left="", bottom_right="true"))
+
+
+@pytest.fixture(autouse=True)
+def _packaged_codex_models(monkeypatch):
+    """Default models without asking the installed Codex, so tests don't
+    depend on the machine."""
+    monkeypatch.setattr(config, "claude_help", lambda: None)
+    monkeypatch.setattr(config, "codex_catalog", lambda: None)
 
 
 @pytest.fixture(autouse=True)

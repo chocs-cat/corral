@@ -140,3 +140,35 @@ shell. corral explains what each does and installs them when asked
 (`corral tools install`, or the settings screen's Install buttons), using the
 first of Homebrew, pacman or (lazygit only) `go install` that it finds. The
 installer runs in the user's terminal, so sudo and confirmation prompts work.
+
+## Built-in models come from the agent CLIs; custom models add to them (2026-10)
+
+corral's models are built-in or custom. The built-ins are read, once per
+process, from the agent CLIs installed on the machine, so they follow new
+releases without a corral release.
+
+- Claude Code has no command that lists its models. corral ships its
+  aliases (`opus`, `sonnet`, `fable`, `haiku`: each always the latest model
+  of that name), adds any other alias `claude --help` names, and takes the
+  effort levels from `claude --help`. Reading the model catalog Claude Code
+  caches under `~/.claude` would give per-model levels and every model, but
+  it is a private cache; the help text and the aliases were judged the more
+  stable inputs.
+- Codex: the models `codex debug models` lists, each with its own levels.
+  The first model of each family gets the short key (`sol`); later ones
+  keep their version (`5.6-sol`).
+
+When a CLI is missing or can't be read, a packaged list stands in (the
+Claude aliases with `low` to `max`; GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna).
+There is no generic "codex" model for Codex's own default.
+
+Every model has its own effort levels; the per-agent `[efforts]` table is
+gone. A custom model without `efforts` gets those of its agent's first
+built-in model, else `low medium high`.
+
+Custom models are the file's `[[models]]`. They are added after the
+built-ins rather than replacing the list, and one with a built-in's key
+replaces that built-in in place; `hide_models` drops built-ins. This
+replaced "defining any `[[models]]` replaces the defaults", which froze a
+copy of the built-ins in each user's file. `corral config init` leaves
+`[[models]]` commented out.
