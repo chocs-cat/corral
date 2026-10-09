@@ -1,6 +1,6 @@
 [project]
 name = "corral-herdr"
-version = "0.6.0"
+version = "0.7.0"
 description = "Round up your projects into herdr workspaces: a utility tab plus model/effort agent tabs, from a CLI or a TUI."
 readme = "README.md"
 license = "MIT"
