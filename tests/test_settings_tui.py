@@ -11,6 +11,7 @@ from textual.widgets import Button, DataTable, Input, OptionList, Switch, Tabbed
 from corral import config, harnesses, ops, tools
 from corral.tui.app import AgentPicker, Confirm, CorralApp
 from corral.tui.settings import FolderPicker, ModelEditor, SettingsScreen, command_status
+from corral.tui.upgrades import UpgradeScreen
 
 B = "•"
 
@@ -381,27 +382,51 @@ def harness_calls(monkeypatch):
     return calls
 
 
-async def test_harnesses_tab_shows_versions_upgrades_and_saves(app, cfg_path, harness_calls):
+async def test_harnesses_tab_shows_versions_and_saves_the_command(app, cfg_path, harness_calls):
     async with app.run_test(size=(160, 60)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-harnesses")
         await settle(pilot, app)
         assert "1.0 → 1.1 available" in str(s.query_one("#h-codex-status").render())
         assert "not installed" in str(s.query_one("#h-claude-status").render())
-        assert s.query_one("#h-claude-upgrade").has_class("hidden")
-        assert str(s.query_one("#h-codex-upgrade", Button).label) == "Upgrade to 1.1"
         assert s.query_one("#h-codex-command", Input).placeholder == "brew upgrade --cask codex"
+        assert not s.query(".harness-upgrade")  # upgrading is the upgrades screen's job
 
         s.query_one("#h-codex-command", Input).value = "brew upgrade --greedy codex"
-        s.query_one("#harness-upgrade-all", Button).press()  # claude: not installed
-        await pilot.pause(0.3)
-        assert isinstance(app.screen, Confirm)
-        await pilot.press("y")
-        await pilot.pause(0.5)
-        assert app.screen is s
-        assert harness_calls == [("codex", ["brew", "upgrade", "--greedy", "codex"])]
-
+        await pilot.pause(0.1)
+        assert "yours, instead of" in str(s.query_one("#h-codex-hint").render())
         await pilot.press("ctrl+s")
         await settle(pilot, app)
         assert not isinstance(app.screen, SettingsScreen)
+    assert harness_calls == []
     assert saved(cfg_path)["harnesses"] == {"codex": {"command": "brew upgrade --greedy codex"}}
+    assert app.cfg.harnesses["codex"].command == "brew upgrade --greedy codex"
+
+
+async def test_upgrades_screen(app, harness_calls):
+    async with app.run_test(size=(160, 60)) as pilot:
+        await settle(pilot, app)
+        await pilot.press("U")
+        await settle(pilot, app)
+        u = app.screen
+        assert isinstance(u, UpgradeScreen)
+        assert "1.0 → 1.1 available" in str(u.query_one("#u-codex-status").render())
+        assert "Homebrew cask codex" in str(u.query_one("#u-codex-from").render())
+        assert "brew upgrade --cask codex" in str(u.query_one("#u-codex-command").render())
+        assert str(u.query_one("#u-codex-upgrade", Button).label) == "Upgrade Codex to 1.1"
+        assert u.query_one("#u-claude-upgrade").has_class("hidden")  # not installed
+
+        await pilot.press("x")  # main-screen keys do nothing here
+        assert app.screen is u
+        await pilot.press("a")  # upgrade all: only codex is installed
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, Confirm)
+        assert "Codex 1.0 → 1.1" in app.screen.body
+        await pilot.press("y")
+        await pilot.pause(0.5)
+        assert app.screen is u
+        assert harness_calls == [("codex", ["brew"])]
+
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+        assert not isinstance(app.screen, UpgradeScreen)

@@ -25,6 +25,7 @@ The code is laid out in layers, each depending only on the ones above it:
 | `tui/app.py` | the Textual app; calls `ops` in worker threads |
 | `tui/dialogs.py` | modal dialogs: agent picker, stop picker, confirm |
 | `tui/settings.py` | the settings screen (`,`) over `config.save` |
+| `tui/upgrades.py` | the upgrades screen (`U`): harness versions and upgrading them |
 
 The CLI and the TUI both go through `ops`, so put behaviour changes there.
 Tests use `tests/fake_herdr.py`, an in-memory herdr with the same methods as

@@ -47,6 +47,7 @@ from corral.config import (
 )
 from corral.herdr import AGENT_KINDS
 from corral.tui.dialogs import AgentPicker, Confirm
+from corral.tui.upgrades import harness_status
 
 UTILITY_PANES = (("top", "Top"), ("bottom_left", "Bottom left"), ("bottom_right", "Bottom right"))
 UTILITY_SIZES = (("top_percent", "Top height"), ("bottom_left_percent", "Bottom-left width"))
@@ -135,26 +136,6 @@ def tool_status(name: str) -> Text:
     return Text.assemble(
         ("✗ not installed", "yellow"),
         (f"  no Homebrew here: see {st.homepage}", "dim"),
-    )
-
-
-def harness_status(st: harnesses.HarnessStatus, checking: bool = False) -> Text:
-    """The installed version, and the latest version out."""
-    if not st.installed:
-        return Text.assemble(("✗ not installed", "yellow"), (f"  see {st.homepage}", "dim"))
-    if checking:
-        newest = ("checking for a newer version…", "dim")
-    elif st.outdated:
-        newest = (f"→ {st.latest} available", "yellow")
-    elif st.outdated is False:
-        newest = ("the latest", "green")
-    else:
-        newest = ("couldn't check for a newer version", "dim")
-    return Text.assemble(
-        (f"✓ {st.version or 'unknown version'}", "green"),
-        " ",
-        newest,
-        (f"  {config.tilde(Path(st.path or ''))}, from {st.via}", "dim"),
     )
 
 
@@ -443,9 +424,6 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .tool-row > Button { margin-left: 2; }
     SettingsScreen .tool-row > Button.hidden { display: none; }
     SettingsScreen .harness-row > Static { width: auto; padding-top: 1; }
-    SettingsScreen .harness-row > Button { margin-left: 2; }
-    SettingsScreen .harness-row > Button.hidden { display: none; }
-    SettingsScreen #harness-upgrade-all { margin-top: 1; }
     SettingsScreen #bottom { height: auto; padding: 0 1; border-top: solid $panel; }
     SettingsScreen #file { width: 1fr; padding-top: 1; color: $text-muted; }
     SettingsScreen #bottom Button { margin-left: 1; }
@@ -465,7 +443,6 @@ class SettingsScreen(Screen[Config | None]):
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
         self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
-        self.harnesses_checked = False  # whether harness_info has the latest versions
 
     # layout
 
@@ -603,8 +580,8 @@ class SettingsScreen(Screen[Config | None]):
             with TabPane("Harnesses", id="tab-harnesses"):
                 yield Static(
                     "The agent CLIs corral starts in agent tabs. corral upgrades each the "
-                    "way it was installed: Homebrew, npm, or its own update command. Agents "
-                    "already running keep their version until restarted.",
+                    "way it was installed: Homebrew, npm, or its own update command. Set "
+                    "another command here; press U in the project list to upgrade.",
                     classes="note",
                 )
                 for h in harnesses.HARNESSES:
@@ -613,17 +590,10 @@ class SettingsScreen(Screen[Config | None]):
                     with Horizontal(classes="row harness-row"):
                         yield Label("Installed", classes="field")
                         yield Static("checking…", id=f"h-{h.name}-status")
-                        yield Button(
-                            "Upgrade",
-                            id=f"h-{h.name}-upgrade",
-                            name=h.name,
-                            classes="harness-upgrade hidden",
-                        )
                     with Horizontal(classes="row"):
                         yield Label("Upgrade command", classes="field")
                         yield Input(hs.command, id=f"h-{h.name}-command")
                     yield Static(id=f"h-{h.name}-hint", classes="hint")
-                yield Button("Upgrade all", id="harness-upgrade-all")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
                     yield Label("Refresh every", classes="field")
@@ -891,8 +861,8 @@ class SettingsScreen(Screen[Config | None]):
 
     @work(exclusive=True, group="settings-harnesses")
     async def check_harnesses(self) -> None:
-        """Show each harness's version and how it was installed, then the
-        latest version out (asking takes a moment, so off the UI thread)."""
+        """Show each harness's version, then the latest version out (asking
+        takes a moment, so off the UI thread)."""
         for checking in (True, False):
             for h in harnesses.HARNESSES:
                 st = await asyncio.to_thread(harnesses.status_of, h.name, check_latest=not checking)
@@ -902,27 +872,11 @@ class SettingsScreen(Screen[Config | None]):
                     shlex.join(st.detected) if st.detected else ""
                 )
                 self.update_harness_hint(h.name)
-        self.harnesses_checked = True
-        for h in harnesses.HARNESSES:
-            self.update_harness_button(h.name)
 
     @on(Input.Changed, "#h-claude-command")
     @on(Input.Changed, "#h-codex-command")
     def harness_command_changed(self, event: Input.Changed) -> None:
-        name = (event.input.id or "").split("-")[1]
-        self.update_harness_hint(name)
-        self.update_harness_button(name)
-
-    def update_harness_button(self, name: str) -> None:
-        """Upgrade, when there may be something to upgrade to."""
-        st = self.harness_info.get(name)
-        button = self.query_one(f"#h-{name}-upgrade", Button)
-        if not st or not self.harnesses_checked:
-            button.add_class("hidden")
-            return
-        custom = bool(self.query_one(f"#h-{name}-command", Input).value.strip())
-        button.set_class(not st.installed or (not custom and st.outdated is False), "hidden")
-        button.label = f"Upgrade to {st.latest}" if st.outdated and not custom else "Upgrade"
+        self.update_harness_hint((event.input.id or "").split("-")[1])
 
     def update_harness_hint(self, name: str) -> None:
         st = self.harness_info.get(name)
@@ -944,90 +898,6 @@ class SettingsScreen(Screen[Config | None]):
         except ValueError as e:
             raise ConfigError(f"{name} upgrade command: {e}") from None
         return HarnessSettings(command)
-
-    @on(Button.Pressed, ".harness-upgrade")
-    def upgrade_one(self, event: Button.Pressed) -> None:
-        self.upgrade_harnesses([event.button.name or ""])
-
-    @on(Button.Pressed, "#harness-upgrade-all")
-    def upgrade_all(self) -> None:
-        names = [name for name, st in self.harness_info.items() if st.installed]
-        if not names:
-            self.notify("nothing to upgrade: neither Claude Code nor Codex is installed")
-            return
-        self.upgrade_harnesses(names)
-
-    @work(exclusive=True, group="settings-install")
-    async def upgrade_harnesses(self, names: list[str]) -> None:
-        """Upgrade with the commands as they stand on screen, saved or not;
-        a harness already on the latest version is left alone."""
-        try:
-            chosen = {n: self.harness_settings(n) for n in names}
-        except ConfigError as e:
-            self.notify(str(e), severity="error")
-            return
-        plans = [
-            await asyncio.to_thread(harnesses.upgrade, n, chosen[n], dry_run=True) for n in names
-        ]
-        planned = [p for p in plans if p.action == "planned"]
-        self.report_upgrades([p for p in plans if p.action != "planned"])
-        if not planned:
-            return
-        lines = []
-        for p in planned:
-            title = self.harness_title(p.name)
-            lines.append(f"{title} {p.before or '?'} → {p.latest or 'the latest'}")
-            lines.append(f"    {shlex.join(p.command or [])}")
-        titles = " and ".join(self.harness_title(p.name) for p in planned)
-        if not await self.app.push_screen_wait(
-            Confirm(
-                f"Upgrade {titles}?",
-                "corral will run\n\n"
-                + "\n".join(lines)
-                + "\n\nin this terminal, then come back here.",
-            )
-        ):
-            return
-        results = await self.run_upgrades({p.name: chosen[p.name] for p in planned})
-        self.check_harnesses()
-        self.report_upgrades(results)
-
-    @staticmethod
-    def harness_title(name: str) -> str:
-        return next(h.title for h in harnesses.HARNESSES if h.name == name)
-
-    def report_upgrades(self, results: list[harnesses.UpgradeResult]) -> None:
-        for r in results:
-            title = self.harness_title(r.name)
-            if r.action == "upgraded":
-                self.notify(f"{title} upgraded: {r.before or '?'} → {r.after or '?'}")
-            elif r.action == "current":
-                self.notify(f"{title} {r.after or ''} is already the latest")
-            else:
-                self.notify(
-                    r.error, title=f"{title} was not upgraded", severity="error", timeout=10
-                )
-
-    async def run_upgrades(
-        self, chosen: dict[str, HarnessSettings]
-    ) -> list[harnesses.UpgradeResult]:
-        """Hand the terminal to the upgrades (they may ask for a password or a
-        confirmation); where the app can't suspend, run them in the background."""
-        try:
-            with self.app.suspend():
-                results = []
-                for name, settings in chosen.items():
-                    print(f"corral: upgrading {name}\n", flush=True)
-                    results.append(harnesses.upgrade(name, settings))
-                if failed := [r for r in results if not r.ok]:
-                    errors = "\n".join(r.error for r in failed)
-                    input(f"\n{errors}\nPress Enter to go back to corral. ")
-                return results
-        except SuspendNotSupported:
-            return [
-                await asyncio.to_thread(harnesses.upgrade, name, settings, capture=True)
-                for name, settings in chosen.items()
-            ]
 
     # models
 
