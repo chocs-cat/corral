@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/chocs-cat/corral/compare/v0.6.0...v0.7.0) (2026-10-09)
+
+
+### Features
+
+* **harnesses:** upgrade Claude Code and Codex ([#33](https://github.com/chocs-cat/corral/issues/33)) ([a3bdb9d](https://github.com/chocs-cat/corral/commit/a3bdb9d27d69867cc27cd7f870577e0887dee048))
+
 ## [0.6.0](https://github.com/chocs-cat/corral/compare/v0.5.1...v0.6.0) (2026-10-08)
 
 
