@@ -352,18 +352,19 @@ async def test_start_notes_missing_utility_tools(herdr, tmp_path, root, monkeypa
 
 @pytest.fixture
 def harness_calls(monkeypatch):
-    """Codex installed with Homebrew, Claude Code missing; upgrades are recorded."""
+    """Codex 1.0 installed with Homebrew and 1.1 out, Claude Code missing;
+    upgrades are recorded."""
     calls = []
 
-    def status_of(name, settings=None, **kw):
+    def status_of(name, settings=None, *, check_latest=False, **kw):
         if name == "claude":
             return harnesses.HarnessStatus(
-                "claude", "Claude Code", "https://x", None, None, "", None, None, False, True
+                "claude", "Claude Code", "https://x", None, None, None, "", None, None, False
             )
         argv = ["brew", "upgrade", "--cask", "codex"]
         return harnesses.HarnessStatus(
-            "codex", "Codex", "https://x", "/bin/codex", "1.0", "Homebrew cask codex",
-            argv, argv, False, True,
+            "codex", "Codex", "https://x", "/bin/codex", "1.0", "1.1" if check_latest else None,
+            "Homebrew cask codex", argv, argv, False,
         )  # fmt: skip
 
     def upgrade(name, settings=None, *, dry_run=False, **kw):
@@ -371,21 +372,24 @@ def harness_calls(monkeypatch):
         if not dry_run:
             calls.append((name, argv))
         action = "planned" if dry_run else "upgraded"
-        return harnesses.UpgradeResult(name, action, argv, "1.0", None if dry_run else "1.1")
+        return harnesses.UpgradeResult(
+            name, action, argv, "1.0", None if dry_run else "1.1", latest="1.1"
+        )
 
     monkeypatch.setattr(harnesses, "status_of", status_of)
     monkeypatch.setattr(harnesses, "upgrade", upgrade)
     return calls
 
 
-async def test_harnesses_tab_upgrades_and_saves(app, cfg_path, harness_calls):
+async def test_harnesses_tab_shows_versions_upgrades_and_saves(app, cfg_path, harness_calls):
     async with app.run_test(size=(160, 60)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-harnesses")
         await settle(pilot, app)
-        assert "1.0" in str(s.query_one("#h-codex-status").render())
+        assert "1.0 → 1.1 available" in str(s.query_one("#h-codex-status").render())
         assert "not installed" in str(s.query_one("#h-claude-status").render())
         assert s.query_one("#h-claude-upgrade").has_class("hidden")
+        assert str(s.query_one("#h-codex-upgrade", Button).label) == "Upgrade to 1.1"
         assert s.query_one("#h-codex-command", Input).placeholder == "brew upgrade --cask codex"
 
         s.query_one("#h-codex-command", Input).value = "brew upgrade --greedy codex"
@@ -397,12 +401,7 @@ async def test_harnesses_tab_upgrades_and_saves(app, cfg_path, harness_calls):
         assert app.screen is s
         assert harness_calls == [("codex", ["brew", "upgrade", "--greedy", "codex"])]
 
-        s.query_one("#h-claude-include", Switch).value = False
         await pilot.press("ctrl+s")
         await settle(pilot, app)
         assert not isinstance(app.screen, SettingsScreen)
-    data = saved(cfg_path)["harnesses"]
-    assert data == {
-        "claude": {"upgrade": False},
-        "codex": {"command": "brew upgrade --greedy codex"},
-    }
+    assert saved(cfg_path)["harnesses"] == {"codex": {"command": "brew upgrade --greedy codex"}}

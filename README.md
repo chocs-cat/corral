@@ -58,6 +58,7 @@ uv tool install corral-herdr
 ```
 
 This installs the `corral-herdr` package from PyPI into its own environment.
+It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 
 ### The utility tab's tools
 
@@ -84,16 +85,20 @@ Codex (`codex`). corral upgrades each the way it was installed: a Homebrew
 cask or formula with `brew upgrade`, an npm global package with
 `npm install -g`, otherwise its own `update` command.
 
+It checks for a newer version where the upgrade would come from: Homebrew's
+API for a cask or formula, the npm registry otherwise (for a native Claude
+Code install, on the update channel in its settings).
+
 ```sh
-corral harnesses             # versions, how each was installed, the upgrade command
+corral harnesses             # installed and latest versions, how each was installed
 corral harnesses upgrade     # upgrade them (or name one: corral harnesses upgrade codex)
 ```
 
-The settings screen's Harnesses tab shows the same, with an Upgrade button for
-each and one for all. There you can also set your own upgrade command for a
-harness, or leave one out of upgrading all (`[harnesses.<name>]` in the
-config file). Agents already running keep their version until restarted.
-It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
+A harness already on the latest version is left alone. The settings screen's
+Harnesses tab shows the same, with an Upgrade button for each and one for
+all, and lets you set your own upgrade command for a harness
+(`[harnesses.<name>] command` in the config file). Agents already running
+keep their version until restarted.
 
 ## Use
 

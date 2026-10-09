@@ -16,8 +16,8 @@ say, its packaged list (CLAUDE_MODELS, CODEX_MODELS) stands in. Custom
 models are the file's [[models]]; one with a built-in's key replaces it, and
 `hide_models` drops built-ins. Each model has its own effort levels.
 
-[harnesses.<name>] says how `corral harnesses upgrade` treats Claude Code
-(`claude`) and Codex (`codex`); corral.harnesses does the upgrading.
+[harnesses.<name>] can set the command that upgrades Claude Code (`claude`)
+or Codex (`codex`); corral.harnesses does the upgrading.
 """
 
 from __future__ import annotations
@@ -250,11 +250,10 @@ HARNESS_NAMES = ("claude", "codex")
 
 @dataclass(frozen=True)
 class HarnessSettings:
-    """How `corral harnesses upgrade` treats one harness. `upgrade`: whether
-    upgrading all of them includes it. `command`: what upgrades it, or ""
-    for the way it was installed (corral.harnesses works that out)."""
+    """How `corral harnesses upgrade` upgrades one harness. `command`: what
+    upgrades it, or "" for the way it was installed (corral.harnesses works
+    that out)."""
 
-    upgrade: bool = True
     command: str = ""
 
 
@@ -433,13 +432,12 @@ def from_dict(data: dict) -> Config:
                 raise ConfigError(f"{where}: corral upgrades only {', '.join(HARNESS_NAMES)}")
             if not isinstance(h, dict):
                 raise ConfigError(f"{where}: expected a table")
-            upgrade = _expect(h, "upgrade", bool, f"{where}.") if "upgrade" in h else True
             command = _expect(h, "command", str, f"{where}.") if "command" in h else ""
             try:
                 shlex.split(command)
             except ValueError as e:
                 raise ConfigError(f"{where}.command: {e}") from None
-            cfg.harnesses[name] = HarnessSettings(upgrade, command.strip())
+            cfg.harnesses[name] = HarnessSettings(command.strip())
 
     if "models" in data:
         models = []
@@ -512,10 +510,7 @@ def to_data(cfg: Config) -> dict:
             "top_percent": u.top_percent,
             "bottom_left_percent": u.bottom_left_percent,
         },
-        "harnesses": {
-            name: {"upgrade": h.upgrade, "command": h.command}
-            for name, h in sorted(cfg.harnesses.items())
-        },
+        "harnesses": {name: {"command": h.command} for name, h in sorted(cfg.harnesses.items())},
         "models": [_model_data(m) for m in cfg.custom_models],
         "hide_models": sorted(cfg.hide_models),
     }
@@ -670,11 +665,9 @@ bottom_left_percent = 35
 
 # Upgrading the agent CLIs: `corral harnesses upgrade`, or the settings
 # screen's Harnesses tab. corral upgrades Claude Code and Codex the way each
-# was installed (Homebrew, npm, or its own `update` command). `upgrade = false`
-# leaves one out when upgrading them all; `command` replaces the upgrade
-# command corral works out.
+# was installed (Homebrew, npm, or its own `update` command); `command`
+# replaces the upgrade command corral works out.
 # [harnesses.claude]
-# upgrade = true
 # command = "claude update"
 
 # Built-in models come from the agent CLIs installed here, each with its own

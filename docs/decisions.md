@@ -183,5 +183,12 @@ really lives: a Homebrew cask or formula (`brew upgrade`), an npm global
 package (`npm install -g <package>@latest`), otherwise its own `update`
 command (the native installers). Running a CLI's own `update` on a Homebrew
 or npm install would fight the package manager. `[harnesses.<name>]` can set
-another `command`, or `upgrade = false` to leave one out of upgrading all.
-corral doesn't check for or apply upgrades on its own; the user starts them.
+another `command`; there is no per-harness switch to leave one out of
+upgrading all, which was judged more complication than it was worth.
+
+The latest version comes from where the upgrade would: Homebrew's JSON API
+(not the local `brew info`, which lags until `brew update`), else the npm
+registry's dist-tags, using a native Claude Code install's
+`autoUpdatesChannel`. A harness known to be on the latest version isn't
+upgraded, unless it has a custom command. corral checks when asked (the
+command, the Harnesses tab), never upgrades on its own.

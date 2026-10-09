@@ -138,12 +138,23 @@ def tool_status(name: str) -> Text:
     )
 
 
-def harness_status(st: harnesses.HarnessStatus) -> Text:
+def harness_status(st: harnesses.HarnessStatus, checking: bool = False) -> Text:
+    """The installed version, and the latest version out."""
     if not st.installed:
         return Text.assemble(("✗ not installed", "yellow"), (f"  see {st.homepage}", "dim"))
+    if checking:
+        newest = ("checking for a newer version…", "dim")
+    elif st.outdated:
+        newest = (f"→ {st.latest} available", "yellow")
+    elif st.outdated is False:
+        newest = ("the latest", "green")
+    else:
+        newest = ("couldn't check for a newer version", "dim")
     return Text.assemble(
         (f"✓ {st.version or 'unknown version'}", "green"),
-        (f" — {config.tilde(Path(st.path or ''))}, from {st.via}", "dim"),
+        " ",
+        newest,
+        (f"  {config.tilde(Path(st.path or ''))}, from {st.via}", "dim"),
     )
 
 
@@ -454,6 +465,7 @@ class SettingsScreen(Screen[Config | None]):
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
         self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
+        self.harnesses_checked = False  # whether harness_info has the latest versions
 
     # layout
 
@@ -611,10 +623,6 @@ class SettingsScreen(Screen[Config | None]):
                         yield Label("Upgrade command", classes="field")
                         yield Input(hs.command, id=f"h-{h.name}-command")
                     yield Static(id=f"h-{h.name}-hint", classes="hint")
-                    with Horizontal(classes="row"):
-                        yield Label("Upgrade all", classes="field")
-                        yield Switch(hs.upgrade, id=f"h-{h.name}-include")
-                        yield Label("include it when upgrading all", classes="unit")
                 yield Button("Upgrade all", id="harness-upgrade-all")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
@@ -883,24 +891,38 @@ class SettingsScreen(Screen[Config | None]):
 
     @work(exclusive=True, group="settings-harnesses")
     async def check_harnesses(self) -> None:
-        """Show each harness's version and how it was installed (asking for
-        the version takes a moment, so off the UI thread)."""
-        self.harness_info = {
-            h.name: await asyncio.to_thread(harnesses.status_of, h.name)
-            for h in harnesses.HARNESSES
-        }
-        for name, st in self.harness_info.items():
-            self.query_one(f"#h-{name}-status", Static).update(harness_status(st))
-            self.query_one(f"#h-{name}-upgrade", Button).set_class(not st.installed, "hidden")
-            self.query_one(f"#h-{name}-command", Input).placeholder = (
-                shlex.join(st.detected) if st.detected else ""
-            )
-            self.update_harness_hint(name)
+        """Show each harness's version and how it was installed, then the
+        latest version out (asking takes a moment, so off the UI thread)."""
+        for checking in (True, False):
+            for h in harnesses.HARNESSES:
+                st = await asyncio.to_thread(harnesses.status_of, h.name, check_latest=not checking)
+                self.harness_info[h.name] = st
+                self.query_one(f"#h-{h.name}-status", Static).update(harness_status(st, checking))
+                self.query_one(f"#h-{h.name}-command", Input).placeholder = (
+                    shlex.join(st.detected) if st.detected else ""
+                )
+                self.update_harness_hint(h.name)
+        self.harnesses_checked = True
+        for h in harnesses.HARNESSES:
+            self.update_harness_button(h.name)
 
     @on(Input.Changed, "#h-claude-command")
     @on(Input.Changed, "#h-codex-command")
     def harness_command_changed(self, event: Input.Changed) -> None:
-        self.update_harness_hint((event.input.id or "").split("-")[1])
+        name = (event.input.id or "").split("-")[1]
+        self.update_harness_hint(name)
+        self.update_harness_button(name)
+
+    def update_harness_button(self, name: str) -> None:
+        """Upgrade, when there may be something to upgrade to."""
+        st = self.harness_info.get(name)
+        button = self.query_one(f"#h-{name}-upgrade", Button)
+        if not st or not self.harnesses_checked:
+            button.add_class("hidden")
+            return
+        custom = bool(self.query_one(f"#h-{name}-command", Input).value.strip())
+        button.set_class(not st.installed or (not custom and st.outdated is False), "hidden")
+        button.label = f"Upgrade to {st.latest}" if st.outdated and not custom else "Upgrade"
 
     def update_harness_hint(self, name: str) -> None:
         st = self.harness_info.get(name)
@@ -921,7 +943,7 @@ class SettingsScreen(Screen[Config | None]):
             shlex.split(command)
         except ValueError as e:
             raise ConfigError(f"{name} upgrade command: {e}") from None
-        return HarnessSettings(self.query_one(f"#h-{name}-include", Switch).value, command)
+        return HarnessSettings(command)
 
     @on(Button.Pressed, ".harness-upgrade")
     def upgrade_one(self, event: Button.Pressed) -> None:
@@ -929,49 +951,58 @@ class SettingsScreen(Screen[Config | None]):
 
     @on(Button.Pressed, "#harness-upgrade-all")
     def upgrade_all(self) -> None:
-        names = [
-            h.name
-            for h in harnesses.HARNESSES
-            if self.query_one(f"#h-{h.name}-include", Switch).value
-            and (st := self.harness_info.get(h.name))
-            and st.installed
-        ]
+        names = [name for name, st in self.harness_info.items() if st.installed]
         if not names:
-            self.notify("nothing to upgrade: no harness is installed and included")
+            self.notify("nothing to upgrade: neither Claude Code nor Codex is installed")
             return
         self.upgrade_harnesses(names)
 
     @work(exclusive=True, group="settings-install")
     async def upgrade_harnesses(self, names: list[str]) -> None:
-        """Upgrade with the commands as they stand on screen, saved or not."""
+        """Upgrade with the commands as they stand on screen, saved or not;
+        a harness already on the latest version is left alone."""
         try:
             chosen = {n: self.harness_settings(n) for n in names}
         except ConfigError as e:
             self.notify(str(e), severity="error")
             return
-        plans = [harnesses.upgrade(n, chosen[n], dry_run=True) for n in names]
-        commands = [shlex.join(p.command or []) for p in plans if p.action == "planned"]
-        if not commands:
-            self.notify(plans[0].error, severity="error")
+        plans = [
+            await asyncio.to_thread(harnesses.upgrade, n, chosen[n], dry_run=True) for n in names
+        ]
+        planned = [p for p in plans if p.action == "planned"]
+        self.report_upgrades([p for p in plans if p.action != "planned"])
+        if not planned:
             return
-        titles = " and ".join(h.title for h in harnesses.HARNESSES if h.name in names)
+        lines = []
+        for p in planned:
+            title = self.harness_title(p.name)
+            lines.append(f"{title} {p.before or '?'} → {p.latest or 'the latest'}")
+            lines.append(f"    {shlex.join(p.command or [])}")
+        titles = " and ".join(self.harness_title(p.name) for p in planned)
         if not await self.app.push_screen_wait(
             Confirm(
                 f"Upgrade {titles}?",
                 "corral will run\n\n"
-                + "\n".join(f"    {c}" for c in commands)
+                + "\n".join(lines)
                 + "\n\nin this terminal, then come back here.",
             )
         ):
             return
-        results = await self.run_upgrades(chosen)
+        results = await self.run_upgrades({p.name: chosen[p.name] for p in planned})
         self.check_harnesses()
+        self.report_upgrades(results)
+
+    @staticmethod
+    def harness_title(name: str) -> str:
+        return next(h.title for h in harnesses.HARNESSES if h.name == name)
+
+    def report_upgrades(self, results: list[harnesses.UpgradeResult]) -> None:
         for r in results:
-            title = next(h.title for h in harnesses.HARNESSES if h.name == r.name)
+            title = self.harness_title(r.name)
             if r.action == "upgraded":
                 self.notify(f"{title} upgraded: {r.before or '?'} → {r.after or '?'}")
             elif r.action == "current":
-                self.notify(f"{title} {r.after} is already the latest")
+                self.notify(f"{title} {r.after or ''} is already the latest")
             else:
                 self.notify(
                     r.error, title=f"{title} was not upgraded", severity="error", timeout=10

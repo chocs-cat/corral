@@ -31,7 +31,7 @@ corral ls --json            # every project: path, branch, workspace, agent tabs
 corral ls --open --json     # only projects that have a workspace
 corral models --json        # model keys, tools, effort levels
 corral tools --json         # the utility tab's programs: installed?, how to install
-corral harnesses --json     # Claude Code and Codex: version, install method, upgrade command
+corral harnesses --json     # Claude Code and Codex: installed and latest version, upgrade command
 ```
 
 In `ls` output each project has `workspace: null` or
@@ -113,10 +113,11 @@ ask before running it.
 
 `corral harnesses upgrade [claude|codex]` upgrades Claude Code and Codex, each
 the way it was installed (`brew upgrade`, `npm install -g`, or its own
-`update`), or with the command in the config's `[harnesses.<name>]`
-(`command`; `upgrade = false` leaves one out when no name is given). Run it
-with `--dry-run` first to show the commands, and ask before upgrading: it
-changes software on the user's machine. Agents already running keep their
+`update`), or with the config's `[harnesses.<name>] command`. With no name it
+upgrades both, skipping one already on the latest version (`outdated: false`
+in `corral harnesses --json`; `latest` is null when it couldn't check). Run it
+with `--dry-run` first to show the commands and versions, and ask before
+upgrading: it changes software on the user's machine. Agents already running keep their
 version until restarted.
 
 `corral models --json` lists the models, each with its `source` and effort
