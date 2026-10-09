@@ -34,13 +34,14 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from corral import config, labels, ops, projects, tools
+from corral import config, harnesses, labels, ops, projects, tools
 from corral.config import (
     DEFAULT_PRUNE,
     PERCENT_MAX,
     PERCENT_MIN,
     Config,
     ConfigError,
+    HarnessSettings,
     ModelSpec,
     Utility,
 )
@@ -134,6 +135,15 @@ def tool_status(name: str) -> Text:
     return Text.assemble(
         ("✗ not installed", "yellow"),
         (f"  no Homebrew here: see {st.homepage}", "dim"),
+    )
+
+
+def harness_status(st: harnesses.HarnessStatus) -> Text:
+    if not st.installed:
+        return Text.assemble(("✗ not installed", "yellow"), (f"  see {st.homepage}", "dim"))
+    return Text.assemble(
+        (f"✓ {st.version or 'unknown version'}", "green"),
+        (f" — {config.tilde(Path(st.path or ''))}, from {st.via}", "dim"),
     )
 
 
@@ -421,6 +431,10 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .tool-row > Static { width: auto; padding-top: 1; }
     SettingsScreen .tool-row > Button { margin-left: 2; }
     SettingsScreen .tool-row > Button.hidden { display: none; }
+    SettingsScreen .harness-row > Static { width: auto; padding-top: 1; }
+    SettingsScreen .harness-row > Button { margin-left: 2; }
+    SettingsScreen .harness-row > Button.hidden { display: none; }
+    SettingsScreen #harness-upgrade-all { margin-top: 1; }
     SettingsScreen #bottom { height: auto; padding: 0 1; border-top: solid $panel; }
     SettingsScreen #file { width: 1fr; padding-top: 1; color: $text-muted; }
     SettingsScreen #bottom Button { margin-left: 1; }
@@ -439,6 +453,7 @@ class SettingsScreen(Screen[Config | None]):
         self.hidden: set[str] = set(self.orig.hide_models)
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
+        self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
 
     # layout
 
@@ -573,6 +588,34 @@ class SettingsScreen(Screen[Config | None]):
                     yield Button("Delete", id="model-delete")
                     yield Button("Move up", id="model-up")
                     yield Button("Move down", id="model-down")
+            with TabPane("Harnesses", id="tab-harnesses"):
+                yield Static(
+                    "The agent CLIs corral starts in agent tabs. corral upgrades each the "
+                    "way it was installed: Homebrew, npm, or its own update command. Agents "
+                    "already running keep their version until restarted.",
+                    classes="note",
+                )
+                for h in harnesses.HARNESSES:
+                    hs = c.harnesses.get(h.name, HarnessSettings())
+                    yield Static(h.title, classes="section")
+                    with Horizontal(classes="row harness-row"):
+                        yield Label("Installed", classes="field")
+                        yield Static("checking…", id=f"h-{h.name}-status")
+                        yield Button(
+                            "Upgrade",
+                            id=f"h-{h.name}-upgrade",
+                            name=h.name,
+                            classes="harness-upgrade hidden",
+                        )
+                    with Horizontal(classes="row"):
+                        yield Label("Upgrade command", classes="field")
+                        yield Input(hs.command, id=f"h-{h.name}-command")
+                    yield Static(id=f"h-{h.name}-hint", classes="hint")
+                    with Horizontal(classes="row"):
+                        yield Label("Upgrade all", classes="field")
+                        yield Switch(hs.upgrade, id=f"h-{h.name}-include")
+                        yield Label("include it when upgrading all", classes="unit")
+                yield Button("Upgrade all", id="harness-upgrade-all")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
                     yield Label("Refresh every", classes="field")
@@ -621,6 +664,7 @@ class SettingsScreen(Screen[Config | None]):
         for key, _ in UTILITY_PANES:
             self.update_util_status(key)
         self.update_tools()
+        self.check_harnesses()
         self.util_toggled()
         self.scan_root()
         self.baseline = config.to_data(self.collect())
@@ -835,6 +879,125 @@ class SettingsScreen(Screen[Config | None]):
         except SuspendNotSupported:
             return await asyncio.to_thread(tools.install, name, capture=True)
 
+    # harnesses
+
+    @work(exclusive=True, group="settings-harnesses")
+    async def check_harnesses(self) -> None:
+        """Show each harness's version and how it was installed (asking for
+        the version takes a moment, so off the UI thread)."""
+        self.harness_info = {
+            h.name: await asyncio.to_thread(harnesses.status_of, h.name)
+            for h in harnesses.HARNESSES
+        }
+        for name, st in self.harness_info.items():
+            self.query_one(f"#h-{name}-status", Static).update(harness_status(st))
+            self.query_one(f"#h-{name}-upgrade", Button).set_class(not st.installed, "hidden")
+            self.query_one(f"#h-{name}-command", Input).placeholder = (
+                shlex.join(st.detected) if st.detected else ""
+            )
+            self.update_harness_hint(name)
+
+    @on(Input.Changed, "#h-claude-command")
+    @on(Input.Changed, "#h-codex-command")
+    def harness_command_changed(self, event: Input.Changed) -> None:
+        self.update_harness_hint((event.input.id or "").split("-")[1])
+
+    def update_harness_hint(self, name: str) -> None:
+        st = self.harness_info.get(name)
+        if not st:
+            return
+        hint = self.query_one(f"#h-{name}-hint", Static)
+        if self.query_one(f"#h-{name}-command", Input).value.strip():
+            detected = shlex.join(st.detected) if st.detected else "nothing (not installed)"
+            hint.update(f"yours, instead of {detected}; empty it to go back")
+        elif st.detected:
+            hint.update(f"empty: the way it was installed ({st.via})")
+        else:
+            hint.update("empty: worked out once it's installed")
+
+    def harness_settings(self, name: str) -> HarnessSettings:
+        command = self.query_one(f"#h-{name}-command", Input).value.strip()
+        try:
+            shlex.split(command)
+        except ValueError as e:
+            raise ConfigError(f"{name} upgrade command: {e}") from None
+        return HarnessSettings(self.query_one(f"#h-{name}-include", Switch).value, command)
+
+    @on(Button.Pressed, ".harness-upgrade")
+    def upgrade_one(self, event: Button.Pressed) -> None:
+        self.upgrade_harnesses([event.button.name or ""])
+
+    @on(Button.Pressed, "#harness-upgrade-all")
+    def upgrade_all(self) -> None:
+        names = [
+            h.name
+            for h in harnesses.HARNESSES
+            if self.query_one(f"#h-{h.name}-include", Switch).value
+            and (st := self.harness_info.get(h.name))
+            and st.installed
+        ]
+        if not names:
+            self.notify("nothing to upgrade: no harness is installed and included")
+            return
+        self.upgrade_harnesses(names)
+
+    @work(exclusive=True, group="settings-install")
+    async def upgrade_harnesses(self, names: list[str]) -> None:
+        """Upgrade with the commands as they stand on screen, saved or not."""
+        try:
+            chosen = {n: self.harness_settings(n) for n in names}
+        except ConfigError as e:
+            self.notify(str(e), severity="error")
+            return
+        plans = [harnesses.upgrade(n, chosen[n], dry_run=True) for n in names]
+        commands = [shlex.join(p.command or []) for p in plans if p.action == "planned"]
+        if not commands:
+            self.notify(plans[0].error, severity="error")
+            return
+        titles = " and ".join(h.title for h in harnesses.HARNESSES if h.name in names)
+        if not await self.app.push_screen_wait(
+            Confirm(
+                f"Upgrade {titles}?",
+                "corral will run\n\n"
+                + "\n".join(f"    {c}" for c in commands)
+                + "\n\nin this terminal, then come back here.",
+            )
+        ):
+            return
+        results = await self.run_upgrades(chosen)
+        self.check_harnesses()
+        for r in results:
+            title = next(h.title for h in harnesses.HARNESSES if h.name == r.name)
+            if r.action == "upgraded":
+                self.notify(f"{title} upgraded: {r.before or '?'} → {r.after or '?'}")
+            elif r.action == "current":
+                self.notify(f"{title} {r.after} is already the latest")
+            else:
+                self.notify(
+                    r.error, title=f"{title} was not upgraded", severity="error", timeout=10
+                )
+
+    async def run_upgrades(
+        self, chosen: dict[str, HarnessSettings]
+    ) -> list[harnesses.UpgradeResult]:
+        """Hand the terminal to the upgrades (they may ask for a password or a
+        confirmation); where the app can't suspend, run them in the background."""
+        try:
+            with self.app.suspend():
+                results = []
+                for name, settings in chosen.items():
+                    print(f"corral: upgrading {name}\n", flush=True)
+                    results.append(harnesses.upgrade(name, settings))
+                if failed := [r for r in results if not r.ok]:
+                    errors = "\n".join(r.error for r in failed)
+                    input(f"\n{errors}\nPress Enter to go back to corral. ")
+                return results
+        except SuspendNotSupported:
+            return [
+                await asyncio.to_thread(harnesses.upgrade, name, settings, capture=True)
+                for name, settings in chosen.items()
+            ]
+
     # models
 
     def render_models(self, builtin: int | None = None, custom: int | None = None) -> None:
@@ -1043,6 +1206,7 @@ class SettingsScreen(Screen[Config | None]):
                 top_percent=sizes["top_percent"],
                 bottom_left_percent=sizes["bottom_left_percent"],
             ),
+            harnesses={h.name: self.harness_settings(h.name) for h in harnesses.HARNESSES},
             custom_models=tuple(self.custom),
             hide_models=frozenset(self.hidden),
         )

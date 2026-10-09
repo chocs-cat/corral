@@ -1,6 +1,6 @@
 ---
 name: corral
-description: Drive herdr project workspaces with the `corral` CLI — build a workspace for a project (a utility tab plus model/effort agent tabs), open more agent tabs ("give me an Opus high tab", "another Sonnet in courses"), stop agents, close whole workspaces, and list which projects have workspaces and what their agents are doing. Use this whenever the user wants to open, set up, launch or get started on a project in herdr, says "open X in herdr" or "set me up for Y", asks for a new agent tab or pane with a given model/effort, wants to stop an agent or close a workspace, asks what is running where, or wants a herdr agent prompted at a later time. Also covers corral's config (~/.config/corral/config.toml) and the herdr workspace-trust prompt.
+description: Drive herdr project workspaces with the `corral` CLI — build a workspace for a project (a utility tab plus model/effort agent tabs), open more agent tabs ("give me an Opus high tab", "another Sonnet in courses"), stop agents, close whole workspaces, and list which projects have workspaces and what their agents are doing. Use this whenever the user wants to open, set up, launch or get started on a project in herdr, says "open X in herdr" or "set me up for Y", asks for a new agent tab or pane with a given model/effort, wants to stop an agent or close a workspace, asks what is running where, or wants a herdr agent prompted at a later time. Also covers upgrading Claude Code and Codex through corral, corral's config (~/.config/corral/config.toml) and the herdr workspace-trust prompt.
 ---
 
 # corral
@@ -31,6 +31,7 @@ corral ls --json            # every project: path, branch, workspace, agent tabs
 corral ls --open --json     # only projects that have a workspace
 corral models --json        # model keys, tools, effort levels
 corral tools --json         # the utility tab's programs: installed?, how to install
+corral harnesses --json     # Claude Code and Codex: version, install method, upgrade command
 ```
 
 In `ls` output each project has `workspace: null` or
@@ -109,6 +110,14 @@ says whether yazi and lazygit are installed and how corral would install them;
 `corral tools install [yazi|lazygit]` installs them with Homebrew, pacman or
 go. It installs software on the user's machine (pacman runs under sudo), so
 ask before running it.
+
+`corral harnesses upgrade [claude|codex]` upgrades Claude Code and Codex, each
+the way it was installed (`brew upgrade`, `npm install -g`, or its own
+`update`), or with the command in the config's `[harnesses.<name>]`
+(`command`; `upgrade = false` leaves one out when no name is given). Run it
+with `--dry-run` first to show the commands, and ask before upgrading: it
+changes software on the user's machine. Agents already running keep their
+version until restarted.
 
 `corral models --json` lists the models, each with its `source` and effort
 levels; check it rather than guessing a key. Built-in models come from the

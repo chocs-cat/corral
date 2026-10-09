@@ -8,6 +8,7 @@
     corral ls ...               projects, their workspaces and agents
     corral models               the models and their effort levels
     corral tools [install]      the utility tab's programs; install yazi/lazygit
+    corral harnesses [upgrade]  Claude Code and Codex: versions; upgrade them
     corral config path|init|show
 
 Every command takes --json: the result goes to stdout as JSON and progress
@@ -27,7 +28,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from corral import __version__, config, labels, ops, projects, tools
+from corral import __version__, config, harnesses, labels, ops, projects, tools
 from corral.config import Config, ConfigError
 from corral.herdr import Herdr, HerdrError
 
@@ -297,6 +298,53 @@ def cmd_tools_install(ctx: Ctx) -> int:
     return EXIT_OK if all(r.ok for r in results) else EXIT_FAILED
 
 
+def cmd_harnesses(ctx: Ctx) -> int:
+    rows = harnesses.status(ctx.cfg)
+    if ctx.json:
+        print(json.dumps({"harnesses": _plain(rows)}, indent=2, ensure_ascii=False))
+        return EXIT_OK
+    for h in rows:
+        print(f"{h.name} — {h.title}")
+        if not h.installed:
+            print(f"  not installed · see {h.homepage}")
+            continue
+        facts = [f"{h.version or 'unknown version'}: {config.tilde(Path(h.path or ''))}", h.via]
+        print("  " + " · ".join(facts))
+        how = "your command" if h.custom else "upgrade"
+        line = f"  {how}: {shlex.join(h.command or [])}"
+        print(line + ("" if h.upgrade else "  (left out of upgrading all)"))
+    return EXIT_OK
+
+
+def cmd_harnesses_upgrade(ctx: Ctx) -> int:
+    a = ctx.args
+    names = a.name or harnesses.to_upgrade(ctx.cfg)
+    if not names:
+        ctx.report("nothing to upgrade: no harness is installed and included")
+    results = []
+    for name in names:
+        settings = ctx.cfg.harnesses.get(name)
+        plan = harnesses.upgrade(name, settings, dry_run=True)
+        if plan.action == "planned" and not a.dry_run:
+            ctx.report(f"upgrade {name}: {shlex.join(plan.command or [])}")
+            res = harnesses.upgrade(name, settings, stdout=sys.stderr if ctx.json else None)
+        else:
+            res = plan
+        results.append(res)
+        if res.action == "upgraded":
+            ctx.report(f"  upgraded {name}: {res.before or '?'} → {res.after or '?'}")
+        elif res.action == "current":
+            ctx.report(f"  current  {name} {res.after}")
+        elif res.action == "planned":
+            ctx.report(f"  would run  {shlex.join(res.command or [])}")
+        else:
+            ctx.report(f"  FAILED {name} — {res.error}", error=True)
+    ctx.emit(results)
+    if any(r.action == "unknown" for r in results):
+        return EXIT_USAGE
+    return EXIT_OK if all(r.ok for r in results) else EXIT_FAILED
+
+
 def cmd_config(ctx: Ctx) -> int:
     a = ctx.args
     path = Path(a.config).expanduser() if a.config else config.config_path()
@@ -320,6 +368,7 @@ def cmd_config(ctx: Ctx) -> int:
             "refresh_seconds": cfg.refresh_seconds,
             "agent_timeout_ms": cfg.agent_timeout_ms,
             "utility": asdict(cfg.utility),
+            "harnesses": {k: asdict(v) for k, v in cfg.harnesses.items()},
             "models": [asdict(m) for m in cfg.models],
             "hide_models": sorted(cfg.hide_models),
         }
@@ -471,6 +520,28 @@ def build_parser() -> argparse.ArgumentParser:
     ti.add_argument("name", nargs="*", help="yazi, lazygit (default: the missing ones)")
     ti.add_argument("-n", "--dry-run", action="store_true", help="print the commands only")
     ti.set_defaults(func=cmd_tools_install)
+
+    hs = sub.add_parser(
+        "harnesses",
+        parents=[common],
+        help="Claude Code and Codex: installed versions, and upgrading them",
+        description="List the agent CLIs corral starts -- Claude Code (claude) and Codex "
+        "(codex) -- with their versions, how each was installed and the command that "
+        "upgrades it. `corral harnesses upgrade` upgrades them.",
+    )
+    hs.set_defaults(func=cmd_harnesses)
+    hs_sub = hs.add_subparsers(dest="harnesses_command", metavar="COMMAND")
+    hu = hs_sub.add_parser(
+        "upgrade",
+        parents=[common],
+        help="upgrade claude and/or codex",
+        description="Upgrade each harness the way it was installed (Homebrew, npm, or "
+        "its own `update` command), or with the config's [harnesses.<name>] command. "
+        "With no names, upgrades the installed ones the config doesn't leave out.",
+    )
+    hu.add_argument("name", nargs="*", help="claude, codex (default: all included)")
+    hu.add_argument("-n", "--dry-run", action="store_true", help="print the commands only")
+    hu.set_defaults(func=cmd_harnesses_upgrade)
 
     cf = sub.add_parser("config", parents=[common], help="config file: path, init, show")
     cf.add_argument("action", choices=["path", "init", "show"])
