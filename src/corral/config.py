@@ -15,6 +15,9 @@ packaged ones plus any its `--help` names) with the effort levels its
 say, its packaged list (CLAUDE_MODELS, CODEX_MODELS) stands in. Custom
 models are the file's [[models]]; one with a built-in's key replaces it, and
 `hide_models` drops built-ins. Each model has its own effort levels.
+
+[harnesses.<name>] can set the command that upgrades Claude Code (`claude`)
+or Codex (`codex`); corral.harnesses does the upgrading.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tomllib
@@ -240,6 +244,22 @@ def builtin_models() -> tuple[ModelSpec, ...]:
 
 PERCENT_MIN, PERCENT_MAX = 10, 90
 
+# The agent CLIs corral can upgrade: Claude Code and Codex.
+HARNESS_NAMES = ("claude", "codex")
+
+
+@dataclass(frozen=True)
+class HarnessSettings:
+    """How `corral harnesses upgrade` upgrades one harness. `command`: what
+    upgrades it, or "" for the way it was installed (corral.harnesses works
+    that out)."""
+
+    command: str = ""
+
+
+def _default_harnesses() -> dict[str, HarnessSettings]:
+    return {name: HarnessSettings() for name in HARNESS_NAMES}
+
 
 @dataclass(frozen=True)
 class Utility:
@@ -269,6 +289,7 @@ class Config:
     refresh_seconds: float = 3.0
     agent_timeout_ms: int = 60000
     utility: Utility = field(default_factory=Utility)
+    harnesses: dict[str, HarnessSettings] = field(default_factory=_default_harnesses)
     builtin_models: tuple[ModelSpec, ...] = field(default_factory=lambda: builtin_models())
     custom_models: tuple[ModelSpec, ...] = ()  # the file's [[models]]
     hide_models: frozenset[str] = frozenset()  # built-ins not offered
@@ -403,6 +424,21 @@ def from_dict(data: dict) -> Config:
             bottom_left_percent=_percent(u, "bottom_left_percent", base.bottom_left_percent),
         )
 
+    if "harnesses" in data:
+        cfg.harnesses = _default_harnesses()
+        for name, h in _expect(data, "harnesses", dict).items():
+            where = f"harnesses.{name}"
+            if name not in HARNESS_NAMES:
+                raise ConfigError(f"{where}: corral upgrades only {', '.join(HARNESS_NAMES)}")
+            if not isinstance(h, dict):
+                raise ConfigError(f"{where}: expected a table")
+            command = _expect(h, "command", str, f"{where}.") if "command" in h else ""
+            try:
+                shlex.split(command)
+            except ValueError as e:
+                raise ConfigError(f"{where}.command: {e}") from None
+            cfg.harnesses[name] = HarnessSettings(command.strip())
+
     if "models" in data:
         models = []
         for i, m in enumerate(_expect(data, "models", list)):
@@ -474,6 +510,7 @@ def to_data(cfg: Config) -> dict:
             "top_percent": u.top_percent,
             "bottom_left_percent": u.bottom_left_percent,
         },
+        "harnesses": {name: {"command": h.command} for name, h in sorted(cfg.harnesses.items())},
         "models": [_model_data(m) for m in cfg.custom_models],
         "hide_models": sorted(cfg.hide_models),
     }
@@ -496,11 +533,30 @@ def _plain(item):
     return item.unwrap() if hasattr(item, "unwrap") else item
 
 
+def _new_table(value: dict, default: dict) -> dict:
+    """A table for a file that lacks it: its sub-tables ([harnesses.claude])
+    hold only the keys that differ from the default, and are left out when
+    none do."""
+    out = {}
+    for k, v in value.items():
+        if isinstance(v, dict):
+            v = {kk: vv for kk, vv in v.items() if vv != default.get(k, {}).get(kk)}
+            if not v:
+                continue
+        out[k] = v
+    return out
+
+
 def _put_table(table, value: dict, default: dict) -> None:
     for k in [k for k in table if k not in value]:
         del table[k]
     for k, v in value.items():
-        if (k in table or v != default.get(k)) and _plain(table.get(k)) != v:
+        if isinstance(v, dict) and isinstance(table.get(k), dict):
+            _put_table(table[k], v, default.get(k, {}))
+        elif isinstance(v, dict):
+            if new := _new_table({k: v}, default):
+                table[k] = new[k]
+        elif (k in table or v != default.get(k)) and _plain(table.get(k)) != v:
             table[k] = v
 
 
@@ -555,6 +611,8 @@ def save(cfg: Config, path: Path) -> None:
                 _put_models(doc, value)
         elif isinstance(value, dict) and isinstance(doc.get(key), dict):
             _put_table(doc[key], value, defaults.get(key, {}))
+        elif isinstance(value, dict):
+            doc[key] = _new_table(value, defaults.get(key, {}))
         elif _plain(doc.get(key)) != value:
             doc[key] = value
     target = path.resolve()
@@ -604,6 +662,13 @@ bottom_left = ""
 bottom_right = "lazygit"
 top_percent = 50
 bottom_left_percent = 35
+
+# Upgrading the agent CLIs: `corral harnesses upgrade`, or the settings
+# screen's Harnesses tab. corral upgrades Claude Code and Codex the way each
+# was installed (Homebrew, npm, or its own `update` command); `command`
+# replaces the upgrade command corral works out.
+# [harnesses.claude]
+# command = "claude update"
 
 # Built-in models come from the agent CLIs installed here, each with its own
 # effort levels: Claude Code's aliases (opus, sonnet, fable, haiku and any

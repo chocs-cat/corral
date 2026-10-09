@@ -32,7 +32,7 @@ workspace w2 'blog' -> /Users/you/Code/blog
 ready: w2
   done
 ────────────────────────────────────────────────────────────────────────────────────────────────
-space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter  g Refresh  , Settings
+space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter  g Refresh  U Upgrades  , Settings
 ```
 
 ## Install
@@ -58,6 +58,7 @@ uv tool install corral-herdr
 ```
 
 This installs the `corral-herdr` package from PyPI into its own environment.
+It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
 
 ### The utility tab's tools
 
@@ -76,7 +77,29 @@ corral tools install    # install the missing ones
 
 The TUI's settings screen (`,`, then the Utility tab) has an Install button for
 each, and the TUI mentions them at start-up when they're missing.
-It needs Python 3.11 or later; `pipx install corral-herdr` works the same way.
+
+### Upgrading Claude Code and Codex
+
+The agent CLIs corral starts, its harnesses, are Claude Code (`claude`) and
+Codex (`codex`). corral upgrades each the way it was installed: a Homebrew
+cask or formula with `brew upgrade`, an npm global package with
+`npm install -g`, otherwise its own `update` command.
+
+It checks for a newer version where the upgrade would come from: Homebrew's
+API for a cask or formula, the npm registry otherwise (for a native Claude
+Code install, on the update channel in its settings).
+
+```sh
+corral harnesses             # installed and latest versions, how each was installed
+corral harnesses upgrade     # upgrade them (or name one: corral harnesses upgrade codex)
+```
+
+A harness already on the latest version is left alone. In the TUI, `U` opens
+the upgrades screen: each harness's installed and latest version, how it was
+installed and the upgrade command, with an Upgrade button for each and one
+for all. The settings screen's Harnesses tab sets your own upgrade command
+for a harness (`[harnesses.<name>] command` in the config file). Agents
+already running keep their version until restarted.
 
 ## Use
 
@@ -90,6 +113,7 @@ corral stop "Opus•high"                 # by tab label, agent name or pane id
 corral close courses --dry-run          # what closing would take with it
 corral ls                               # projects, workspaces, agents
 corral models                           # the models and their effort levels
+corral harnesses upgrade                # upgrade Claude Code and Codex
 ```
 
 Every command takes `--json`: the result goes to stdout as JSON, progress to
@@ -120,13 +144,15 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 | `x` | close the workspace: shows what goes with it, runs on `y` |
 | `→` `←` space | unfold / fold / toggle the tree |
 | `/` `g` `q` | filter, refresh, quit |
+| `U` | upgrades: Claude Code's and Codex's versions, and upgrading them |
 | `,` | settings |
 
 ## Configure
 
 Press `,` in the TUI for the settings screen. Its tabs cover the project root
 (with a folder browser), the agent tabs a new workspace gets, the utility tab's
-three panes and their sizes, the model matrix and effort levels, and a few advanced options.
+three panes and their sizes, the model matrix and effort levels, the
+commands that upgrade Claude Code and Codex, and a few advanced options.
 Saving writes the config file and keeps its comments and layout. If the root
 doesn't exist when the TUI starts, the settings screen opens so you can
 choose one.

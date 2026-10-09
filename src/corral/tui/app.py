@@ -38,6 +38,7 @@ from corral.herdr import Herdr, HerdrError, Workspace
 from corral.projects import AgentTab, Project, Tree
 from corral.tui.dialogs import AgentPicker, Confirm, StopPicker
 from corral.tui.settings import SettingsScreen
+from corral.tui.upgrades import UpgradeScreen
 
 __all__ = ["AgentPicker", "Confirm", "CorralApp", "StopPicker", "run"]
 
@@ -127,6 +128,7 @@ class CorralApp(App):
         Binding("x", "close_ws", "Close WS"),
         Binding("slash", "filter", "Filter"),
         Binding("g", "rescan", "Refresh"),
+        Binding("U", "upgrades", "Upgrades"),
         Binding("comma", "settings", "Settings"),
         Binding("escape", "clear_filter", "Clear filter", show=False),
         Binding("q", "quit", "Quit"),
@@ -208,12 +210,17 @@ class CorralApp(App):
     # dialog or in Settings would act on the project list behind it.
     MAIN_SCREEN_ACTIONS = frozenset(
         {"open", "add_agent", "utility", "stop", "close_ws", "filter", "rescan",
-         "clear_filter", "settings", "quit"}
+         "clear_filter", "upgrades", "settings", "quit"}
     )  # fmt: skip
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # False: disabled, and hidden from the footer
         return not (action in self.MAIN_SCREEN_ACTIONS and len(self.screen_stack) > 1)
+
+    # upgrades
+
+    def action_upgrades(self) -> None:
+        self.push_screen(UpgradeScreen(self.cfg))
 
     # settings
 

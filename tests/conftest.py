@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from corral import config
+from corral import config, harnesses
 from corral.config import Config, Utility
 from tests.fake_herdr import FakeHerdr
 
@@ -52,6 +52,14 @@ def _packaged_codex_models(monkeypatch):
     depend on the machine."""
     monkeypatch.setattr(config, "claude_help", lambda: None)
     monkeypatch.setattr(config, "codex_catalog", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_harness_versions(monkeypatch):
+    """Don't run the installed claude or codex to ask their versions, or ask
+    the network for the latest ones."""
+    monkeypatch.setattr(harnesses, "version", lambda name: None)
+    monkeypatch.setattr(harnesses, "_fetch_json", lambda url: None)
 
 
 @pytest.fixture(autouse=True)

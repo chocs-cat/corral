@@ -172,3 +172,27 @@ replaces that built-in in place; `hide_models` drops built-ins. This
 replaced "defining any `[[models]]` replaces the defaults", which froze a
 copy of the built-ins in each user's file. `corral config init` leaves
 `[[models]]` commented out.
+
+## Harnesses: corral upgrades Claude Code and Codex (2026-10)
+
+The agent CLIs corral starts, its harnesses, are Claude Code and Codex; those
+two are the only ones it supports, and the only ones
+`corral harnesses upgrade` and the TUI's upgrades screen (`U`) upgrade.
+Each is upgraded the way it was installed, read from where its executable
+really lives: a Homebrew cask or formula (`brew upgrade`), an npm global
+package (`npm install -g <package>@latest`), otherwise its own `update`
+command (the native installers). Running a CLI's own `update` on a Homebrew
+or npm install would fight the package manager. `[harnesses.<name>]` can set
+another `command`; there is no per-harness switch to leave one out of
+upgrading all, which was judged more complication than it was worth.
+
+The latest version comes from where the upgrade would: Homebrew's JSON API
+(not the local `brew info`, which lags until `brew update`), else the npm
+registry's dist-tags, using a native Claude Code install's
+`autoUpdatesChannel`. A harness known to be on the latest version isn't
+upgraded, unless it has a custom command. corral checks when asked (the
+command, the upgrades screen, the Harnesses tab), never upgrades on its own.
+
+Upgrading has its own screen, opened from the project list, rather than
+buttons in the settings: the settings screen's Harnesses tab only sets the
+upgrade commands, and the upgrades screen uses the saved ones.

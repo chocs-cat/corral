@@ -34,18 +34,20 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from corral import config, labels, ops, projects, tools
+from corral import config, harnesses, labels, ops, projects, tools
 from corral.config import (
     DEFAULT_PRUNE,
     PERCENT_MAX,
     PERCENT_MIN,
     Config,
     ConfigError,
+    HarnessSettings,
     ModelSpec,
     Utility,
 )
 from corral.herdr import AGENT_KINDS
 from corral.tui.dialogs import AgentPicker, Confirm
+from corral.tui.upgrades import harness_status
 
 UTILITY_PANES = (("top", "Top"), ("bottom_left", "Bottom left"), ("bottom_right", "Bottom right"))
 UTILITY_SIZES = (("top_percent", "Top height"), ("bottom_left_percent", "Bottom-left width"))
@@ -421,6 +423,7 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .tool-row > Static { width: auto; padding-top: 1; }
     SettingsScreen .tool-row > Button { margin-left: 2; }
     SettingsScreen .tool-row > Button.hidden { display: none; }
+    SettingsScreen .harness-row > Static { width: auto; padding-top: 1; }
     SettingsScreen #bottom { height: auto; padding: 0 1; border-top: solid $panel; }
     SettingsScreen #file { width: 1fr; padding-top: 1; color: $text-muted; }
     SettingsScreen #bottom Button { margin-left: 1; }
@@ -439,6 +442,7 @@ class SettingsScreen(Screen[Config | None]):
         self.hidden: set[str] = set(self.orig.hide_models)
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
+        self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
 
     # layout
 
@@ -573,6 +577,23 @@ class SettingsScreen(Screen[Config | None]):
                     yield Button("Delete", id="model-delete")
                     yield Button("Move up", id="model-up")
                     yield Button("Move down", id="model-down")
+            with TabPane("Harnesses", id="tab-harnesses"):
+                yield Static(
+                    "The agent CLIs corral starts in agent tabs. corral upgrades each the "
+                    "way it was installed: Homebrew, npm, or its own update command. Set "
+                    "another command here; press U in the project list to upgrade.",
+                    classes="note",
+                )
+                for h in harnesses.HARNESSES:
+                    hs = c.harnesses.get(h.name, HarnessSettings())
+                    yield Static(h.title, classes="section")
+                    with Horizontal(classes="row harness-row"):
+                        yield Label("Installed", classes="field")
+                        yield Static("checking…", id=f"h-{h.name}-status")
+                    with Horizontal(classes="row"):
+                        yield Label("Upgrade command", classes="field")
+                        yield Input(hs.command, id=f"h-{h.name}-command")
+                    yield Static(id=f"h-{h.name}-hint", classes="hint")
             with TabPane("Advanced", id="tab-advanced"):
                 with Horizontal(classes="row"):
                     yield Label("Refresh every", classes="field")
@@ -621,6 +642,7 @@ class SettingsScreen(Screen[Config | None]):
         for key, _ in UTILITY_PANES:
             self.update_util_status(key)
         self.update_tools()
+        self.check_harnesses()
         self.util_toggled()
         self.scan_root()
         self.baseline = config.to_data(self.collect())
@@ -835,6 +857,48 @@ class SettingsScreen(Screen[Config | None]):
         except SuspendNotSupported:
             return await asyncio.to_thread(tools.install, name, capture=True)
 
+    # harnesses
+
+    @work(exclusive=True, group="settings-harnesses")
+    async def check_harnesses(self) -> None:
+        """Show each harness's version, then the latest version out (asking
+        takes a moment, so off the UI thread)."""
+        for checking in (True, False):
+            for h in harnesses.HARNESSES:
+                st = await asyncio.to_thread(harnesses.status_of, h.name, check_latest=not checking)
+                self.harness_info[h.name] = st
+                self.query_one(f"#h-{h.name}-status", Static).update(harness_status(st, checking))
+                self.query_one(f"#h-{h.name}-command", Input).placeholder = (
+                    shlex.join(st.detected) if st.detected else ""
+                )
+                self.update_harness_hint(h.name)
+
+    @on(Input.Changed, "#h-claude-command")
+    @on(Input.Changed, "#h-codex-command")
+    def harness_command_changed(self, event: Input.Changed) -> None:
+        self.update_harness_hint((event.input.id or "").split("-")[1])
+
+    def update_harness_hint(self, name: str) -> None:
+        st = self.harness_info.get(name)
+        if not st:
+            return
+        hint = self.query_one(f"#h-{name}-hint", Static)
+        if self.query_one(f"#h-{name}-command", Input).value.strip():
+            detected = shlex.join(st.detected) if st.detected else "nothing (not installed)"
+            hint.update(f"yours, instead of {detected}; empty it to go back")
+        elif st.detected:
+            hint.update(f"empty: the way it was installed ({st.via})")
+        else:
+            hint.update("empty: worked out once it's installed")
+
+    def harness_settings(self, name: str) -> HarnessSettings:
+        command = self.query_one(f"#h-{name}-command", Input).value.strip()
+        try:
+            shlex.split(command)
+        except ValueError as e:
+            raise ConfigError(f"{name} upgrade command: {e}") from None
+        return HarnessSettings(command)
+
     # models
 
     def render_models(self, builtin: int | None = None, custom: int | None = None) -> None:
@@ -1043,6 +1107,7 @@ class SettingsScreen(Screen[Config | None]):
                 top_percent=sizes["top_percent"],
                 bottom_left_percent=sizes["bottom_left_percent"],
             ),
+            harnesses={h.name: self.harness_settings(h.name) for h in harnesses.HARNESSES},
             custom_models=tuple(self.custom),
             hide_models=frozenset(self.hidden),
         )
