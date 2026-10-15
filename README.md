@@ -125,10 +125,13 @@ command (`corral --root ~/Work ls`).
 
 Every directory in the root is a project. So is every git repo nested up to
 `scan_depth` levels inside one (`shop/api`), along with the plain folders
-that lead to one (`Archive/2024/`). A project's workspace is labelled with
-its path relative to the root, so two nested repos that share a name don't
-collide. Hidden directories and dependency/build folders (`node_modules`,
-`vendor`, `dist`, …) are skipped.
+that lead to one (`Archive/2024/`). With `nested_folders = true` (or
+*Nested folders* in the settings), every other folder up to `scan_depth`
+levels below a top-level folder is a project too (`scratch/drafts/`), except
+folders inside a git repo, which belong to that repo's project. A project's
+workspace is labelled with its path relative to the root, so two nested repos
+that share a name don't collide. Hidden directories and dependency/build
+folders (`node_modules`, `vendor`, `dist`, …) are skipped.
 
 Your home directory is a project too: it heads the list as `~`, and its
 workspace is labelled `~` (quote it on the command line: `corral close '~'`).
@@ -170,6 +173,7 @@ else `~/.config/corral/config.toml` (on macOS too). Every key is optional.
 ```toml
 root = "~/Code"                     # also --root / $CORRAL_ROOT
 scan_depth = 3
+nested_folders = false              # also list plain nested folders
 default_agents = ["sonnet/medium"]
 
 [utility]                           # "" = plain shell
