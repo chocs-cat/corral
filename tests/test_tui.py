@@ -1,5 +1,6 @@
 """Drive the TUI headlessly against the fake herdr."""
 
+from textual.widgets import DataTable
 from textual.widgets._header import HeaderTitle
 
 from corral import ops
@@ -37,6 +38,26 @@ async def test_tree_folds_and_open_builds_nested_workspace(herdr, cfg):
         assert "shop/api" not in rows(app)
         await pilot.press("space")  # space toggles the fold
         assert "shop/api" in rows(app)
+
+
+async def test_plain_nested_folder_shows_and_opens(herdr, cfg, root):
+    (root / "scratch" / "drafts").mkdir()
+    cfg.nested_folders = True  # DEC-24
+    app = CorralApp(cfg, herdr)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        table = app.query_one("#projects", DataTable)
+        assert table.get_cell("scratch", "project").plain.endswith("scratch/ · 1 folder")
+        assert table.get_cell("shop", "project").plain.endswith("shop · 2 repos")
+        app.move_to("scratch")
+        await pilot.press("right")
+        await pilot.press("right")  # step into the first child
+        assert app.current_rel() == "scratch/drafts"
+        await pilot.press("o")
+        await settle(pilot, app)
+        assert [w["label"] for w in herdr.ws.values()] == ["scratch/drafts"]
+        want = str((root / "scratch" / "drafts").resolve())
+        assert all(p["cwd"] == want for p in herdr.panes.values())
 
 
 async def test_header_stays_one_line_and_uses_bullet(herdr, cfg):

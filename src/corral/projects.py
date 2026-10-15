@@ -1,8 +1,10 @@
 """Projects under the root, and which herdr workspace belongs to which.
 
 A project is every top-level directory of the root, plus git repos nested up
-to `scan_depth` levels below one and the plain folders that lead to them. The
-home directory is a project too, labelled "~" and listed first.
+to `scan_depth` levels below one and the plain folders that lead to them; with
+`nested_folders` on, every other folder nested up to `scan_depth` levels below
+one too, unless a git repo is above it (DEC-24). The home directory is a
+project too, labelled "~" and listed first.
 
 A project's workspace label is its path relative to the root ("courses",
 "shop/api"); the home directory is "~" and any other directory outside
@@ -97,17 +99,20 @@ def _subdirs(d: Path, prune: frozenset[str], follow_links: bool) -> list[os.DirE
     return sorted(keep, key=lambda e: e.name.lower())
 
 
-def _nested(d: Path, rel: str, depth: int, max_depth: int, prune: frozenset[str]) -> list[Project]:
-    """Preorder list of the repos below d, plus the folders that lead to them.
-    Symlinks are not followed here, so a link loop can't recurse."""
+def _nested(
+    d: Path, rel: str, depth: int, max_depth: int, prune: frozenset[str], plain: bool = False
+) -> list[Project]:
+    """Preorder list of the repos below d, plus the folders that lead to them;
+    with `plain`, every folder below d up to max_depth that has no repo above
+    it (DEC-24). Symlinks are not followed here, so a link loop can't recurse."""
     if depth > max_depth:
         return []
     found: list[Project] = []
     for e in _subdirs(d, prune, follow_links=False):
         sub, srel = Path(e.path), f"{rel}/{e.name}"
-        below = _nested(sub, srel, depth + 1, max_depth, prune)
         is_repo = (sub / ".git").exists()
-        if not (is_repo or below):
+        below = _nested(sub, srel, depth + 1, max_depth, prune, plain and not is_repo)
+        if not (is_repo or below or plain):
             continue
         found.append(
             Project(
@@ -142,12 +147,14 @@ def scan(cfg: Config) -> Tree:
         tops.append(HOME)
     for e in _subdirs(root, cfg.prune, follow_links=True):
         path = Path(e.path)
-        below = _nested(path, e.name, 1, cfg.scan_depth, cfg.prune)
+        is_repo = (path / ".git").exists()
+        plain = cfg.nested_folders and not is_repo
+        below = _nested(path, e.name, 1, cfg.scan_depth, cfg.prune, plain)
         top = Project(
             rel=e.name,
             path=path.resolve(),
             depth=0,
-            is_repo=(path / ".git").exists(),
+            is_repo=is_repo,
             children=[k.rel for k in below if k.parent == e.name],
             repos_below=sum(1 for k in below if k.is_repo),
             branch=git_branch(path),

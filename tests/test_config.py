@@ -35,6 +35,16 @@ def test_default_toml_round_trips(tmp_path, monkeypatch):
     assert cfg.models == config.builtin_models()
     assert cfg.utility.top == "yazi"
     assert (cfg.utility.top_percent, cfg.utility.bottom_left_percent) == (50, 35)
+    assert cfg.nested_folders is False
+
+
+def test_nested_folders(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text("nested_folders = true\n")
+    cfg = config.load_file(f)
+    assert cfg.nested_folders is True
+    assert config.from_dict(config.to_data(cfg)).nested_folders is True
+    assert config.Config().nested_folders is False
 
 
 def test_file_values_and_root_precedence(tmp_path, monkeypatch):
@@ -76,6 +86,7 @@ args = "-m gpt-5.6-luna -c model_reasoning_effort={effort}"
         ),
         ('default_agents = ["nope/high"]\n', "unknown model 'nope'"),
         ("root = 3\n", "root: expected str"),
+        ('nested_folders = "yes"\n', "nested_folders: expected bool"),
         ("root = \n", "Invalid"),
     ],
 )

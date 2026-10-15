@@ -41,7 +41,10 @@ or `exited` for an agent tab whose agent has gone. `other_workspaces` lists
 workspaces that belong to no project under the root.
 
 Project labels are paths relative to the root: a nested repo is
-`shop/api`. The home directory is always a project, listed first and
+`shop/api`. A plain folder nested below a top-level folder (one that isn't a
+git repo and holds none) appears in `ls`, with `is_repo: false`, only when
+the config's `nested_folders` is on; a folder inside a git repo never does.
+The home directory is always a project, listed first and
 labelled `~` (`corral up ~`; quote the label, `'~'`, when you pass it to
 `close`). Refer to projects by path when running `up`; `ls` gives you
 the path.
@@ -98,7 +101,9 @@ live in these workspaces.
 `$XDG_CONFIG_HOME/corral/config.toml`, else `~/.config/corral/config.toml`,
 on macOS too. `corral config init` writes a commented starter file, and
 `corral config show` prints the settings in effect. The root can also come
-from `--root` or `$CORRAL_ROOT`. People can also change every setting from
+from `--root` or `$CORRAL_ROOT`. `scan_depth` sets how deep below each
+top-level folder `ls` looks for nested repos, and `nested_folders = true`
+also lists the plain folders there. People can also change every setting from
 the TUI's settings screen (press `,`), so point a user there rather than
 hand-editing the file for them unless they ask.
 

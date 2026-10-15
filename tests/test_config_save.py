@@ -126,3 +126,21 @@ def test_load_file_ignores_the_root_override(cfg_file, monkeypatch):
     monkeypatch.setenv("CORRAL_ROOT", "/elsewhere")
     assert config.load(cfg_file).root == Path("/elsewhere")
     assert config.load_file(cfg_file).root == Path("~/Code").expanduser()
+
+
+def test_nested_folders_changes_only_its_line(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    f = tmp_path / "config.toml"
+    f.write_text(config.DEFAULT_TOML)
+    c = config.load_file(f)
+    c.nested_folders = True
+    config.save(c, f)
+    want = config.DEFAULT_TOML.replace("nested_folders = false", "nested_folders = true")
+    assert f.read_text() == want
+
+
+def test_default_nested_folders_is_not_added_to_a_file_without_it(cfg_file):
+    c = config.load_file(cfg_file)
+    assert c.nested_folders is False
+    config.save(c, cfg_file)
+    assert "nested_folders" not in cfg_file.read_text()  # DEC-6

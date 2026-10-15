@@ -370,6 +370,7 @@ def cmd_config(ctx: Ctx) -> int:
             "file": str(cfg.path) if cfg.path else None,
             "root": str(cfg.root),
             "scan_depth": cfg.scan_depth,
+            "nested_folders": cfg.nested_folders,
             "prune": sorted(cfg.prune),
             "default_agents": list(cfg.default_agents),
             "refresh_seconds": cfg.refresh_seconds,

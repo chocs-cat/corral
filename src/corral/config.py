@@ -284,6 +284,7 @@ class Utility:
 class Config:
     root: Path = field(default_factory=lambda: Path("~/Code").expanduser())
     scan_depth: int = 3
+    nested_folders: bool = False  # also list plain nested folders (DEC-24)
     prune: frozenset[str] = DEFAULT_PRUNE
     default_agents: tuple[str, ...] = ("sonnet/medium",)
     refresh_seconds: float = 3.0
@@ -401,6 +402,8 @@ def from_dict(data: dict) -> Config:
         cfg.root = Path(_expect(data, "root", str)).expanduser()
     if "scan_depth" in data:
         cfg.scan_depth = _expect(data, "scan_depth", int)
+    if "nested_folders" in data:
+        cfg.nested_folders = _expect(data, "nested_folders", bool)
     if "prune" in data:
         cfg.prune = frozenset(_expect(data, "prune", list))
     if "prune_extra" in data:
@@ -499,6 +502,7 @@ def to_data(cfg: Config) -> dict:
     data: dict = {
         "root": tilde(cfg.root),
         "scan_depth": cfg.scan_depth,
+        "nested_folders": cfg.nested_folders,
         "default_agents": list(cfg.default_agents),
         "refresh_seconds": float(cfg.refresh_seconds),
         "agent_timeout_ms": cfg.agent_timeout_ms,
@@ -635,8 +639,13 @@ DEFAULT_TOML = """\
 # $CORRAL_ROOT.
 root = "~/Code"
 
-# How many levels below a top-level project to look for nested git repos.
+# How many levels below a top-level project to look for nested git repos (and,
+# with nested_folders, plain folders).
 scan_depth = 3
+
+# Also list the folders nested below a top-level folder that aren't git
+# repos (up to scan_depth levels; folders inside a repo stay hidden).
+nested_folders = false
 
 # Directory names never descended into. `prune` replaces the built-in list;
 # `prune_extra` adds to it. Hidden directories are always skipped.
