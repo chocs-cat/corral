@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/chocs-cat/corral/compare/v0.7.0...v0.8.0) (2026-10-15)
+
+
+### Features
+
+* list nested folders that aren't git repos (opt-in) ([#41](https://github.com/chocs-cat/corral/issues/41)) ([6169b75](https://github.com/chocs-cat/corral/commit/6169b75521c14bffd581ac0e72e47e929a97e06b)), closes [#39](https://github.com/chocs-cat/corral/issues/39)
+
 ## [0.7.0](https://github.com/chocs-cat/corral/compare/v0.6.0...v0.7.0) (2026-10-09)
 
 
