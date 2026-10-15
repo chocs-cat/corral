@@ -47,7 +47,22 @@ def test_config_init_and_show(run, tmp_path, capsys):
     assert run("config", "init", "--config", str(target)) == cli.EXIT_FAILED
     capsys.readouterr()
     assert run("config", "show", "--config", str(target)) == 0
-    assert json.loads(capsys.readouterr().out)["file"] == str(target)
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["file"] == str(target)
+    assert shown["nested_folders"] is False
+    assert list(shown).index("nested_folders") == list(shown).index("scan_depth") + 1
+
+
+def test_ls_json_lists_plain_nested_folders_when_asked(run, root, tmp_path, capsys):
+    (root / "scratch" / "drafts").mkdir()
+    cfg = tmp_path / "cfg.toml"
+    cfg.write_text("nested_folders = true\n")
+    assert run("ls", "--json", "--config", str(cfg)) == 0
+    rows = {p["project"]: p for p in json.loads(capsys.readouterr().out)["projects"]}
+    assert rows["scratch/drafts"]["is_repo"] is False
+    assert run("ls", "--json") == 0  # off by default
+    rows = {p["project"]: p for p in json.loads(capsys.readouterr().out)["projects"]}
+    assert "scratch/drafts" not in rows
 
 
 @pytest.mark.parametrize("before", [True, False])

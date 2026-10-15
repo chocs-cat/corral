@@ -77,3 +77,61 @@ def test_find_workspace_by_label_then_legacy_basename(herdr, root):
     found = projects.find_workspace(herdr.snapshot(), "shop/api", api)
     assert found
     assert found.id == ws2
+
+
+def _plain_folders(root: Path) -> None:
+    """Plain folders around the fixture's repos (DEC-24): nested in plain
+    top-level folders, inside a repo, pruned and hidden."""
+    for rel in (
+        "scratch/drafts/2025",
+        "Archive/notes",
+        "shop/services/notes",
+        "shop/api/src",
+        "Archive/2024/game-jam/src",
+        "scratch/node_modules/x",
+        "scratch/.cache",
+    ):
+        (root / rel).mkdir(parents=True)
+
+
+PLAIN = ["scratch/drafts", "scratch/drafts/2025", "Archive/notes", "shop/services/notes"]
+
+
+def test_plain_nested_folders_stay_hidden_by_default(cfg, root):
+    _plain_folders(root)
+    n = projects.scan(cfg).nodes
+    for rel in PLAIN:
+        assert rel not in n
+    assert n["scratch"].children == []
+
+
+def test_nested_folders_lists_plain_folders_with_no_repo_above(cfg, root):
+    _plain_folders(root)
+    cfg.nested_folders = True
+    n = projects.scan(cfg).nodes
+    drafts = n["scratch/drafts"]
+    assert (drafts.depth, drafts.parent, drafts.is_repo, drafts.branch) == (1, "scratch", False, "")
+    assert drafts.children == ["scratch/drafts/2025"]
+    assert n["scratch/drafts/2025"].depth == 2
+    assert n["scratch"].children == ["scratch/drafts"]
+    assert n["scratch"].repos_below == 0
+    assert n["Archive/notes"].parent == "Archive"
+    assert n["Archive"].children == ["Archive/2024", "Archive/notes"]
+    # a repo above: shop is one, so nothing plain below it is listed
+    assert "Archive/2024/game-jam/src" not in n  # below a nested repo
+    for rel in ("shop/notes", "shop/services", "shop/services/notes", "shop/api/src"):
+        assert rel not in n
+    for rel in ("scratch/node_modules", "scratch/node_modules/x", "scratch/.cache"):
+        assert rel not in n  # pruned and hidden folders stay skipped
+    assert "cSolveWordle/node_modules" not in n
+    assert "Archive/2024/game-jam" in n
+    assert n["shop"].children == ["shop/api", "shop/web-app"]
+
+
+def test_nested_folders_stops_at_the_scan_depth(cfg, root):
+    _plain_folders(root)
+    cfg.nested_folders = True
+    cfg.scan_depth = 1
+    n = projects.scan(cfg).nodes
+    assert "scratch/drafts" in n
+    assert "scratch/drafts/2025" not in n
