@@ -224,3 +224,19 @@ request's title is the Conventional Commit it squashes to, while unit commits
 on a chunk branch keep their relay titles.
 
 *Where:* AGENTS.md.
+
+## DEC-24: Plain nested folders are listed only when asked (2026-10)
+
+By default a folder nested below a top-level folder of the root is a project
+only when it is a git repo or leads to one. `nested_folders = true` (the
+settings screen's *Nested folders* switch) also lists every other nested
+folder, up to `scan_depth` levels below a top-level folder, so it can be
+opened like any project; hidden and pruned folders stay skipped. A folder
+with a git repo above it (at any level below the root, the top-level folder
+included) stays unlisted either way: a repo's `src/` or `docs/` belongs to
+that repo's project, and only the repos nested in it, with the folders that
+lead to them, are listed there.
+
+Off by default, so an existing root's list doesn't grow unasked. Top-level
+folders, `~` and `corral up DIR` already accepted any directory and don't
+change. (#39)
