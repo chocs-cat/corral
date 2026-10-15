@@ -309,6 +309,14 @@ class CorralApp(App):
         own = 1 if self.st(rel).ws else 0
         return own + sum(self.subtree_open(c) for c in self.node(rel).children)
 
+    def below(self, p: Project) -> str:
+        """What a folded node holds: its repos, or with none (plain nested
+        folders, DEC-24) its folders."""
+        if p.repos_below:
+            return f"{p.repos_below} repo{'s' if p.repos_below != 1 else ''}"
+        n = len(self.ptree.descendants(p.rel))
+        return f"{n} folder{'s' if n != 1 else ''}"
+
     def visible_set(self) -> set[str] | None:
         """With a filter: matches, their ancestors and their subtrees."""
         needle = self.filter_text.lower()
@@ -367,9 +375,7 @@ class CorralApp(App):
             style = "bold" if s.ws else ("" if p.is_repo else "italic")
             name.append(p.name + ("" if p.is_repo or p.is_home else "/"), style=style)
             if folded:
-                name.append(
-                    f" · {p.repos_below} repo{'s' if p.repos_below != 1 else ''}", style="dim"
-                )
+                name.append(f" · {self.below(p)}", style="dim")
                 n_open = self.subtree_open(p.rel) - (1 if s.ws else 0)
                 if n_open:
                     name.append(f" · {n_open} open", style="green")
@@ -481,7 +487,7 @@ class CorralApp(App):
         else:
             t.append("folder (not a repo)\n", style="dim")
         if p.children:
-            t.append(f"nested   {p.repos_below} repo{'s' if p.repos_below != 1 else ''} below\n")
+            t.append(f"nested   {self.below(p)} below\n")
         if p.is_repo:
             dirty = await asyncio.to_thread(_git_dirty_count, p.path)
             t.append("branch   ")

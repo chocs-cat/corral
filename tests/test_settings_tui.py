@@ -75,6 +75,38 @@ async def test_save_applies_root_and_utility(app, cfg_path, tmp_path):
     assert cfg_path.read_text().startswith("# mine\n")
 
 
+async def test_nested_folders_switch_rescans_and_saves(app, cfg_path, tmp_path):
+    other = tmp_path / "Work"
+    (other / "alpha" / "notes").mkdir(parents=True)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        switch = s.query_one("#nested-folders", Switch)
+        assert switch.value is False  # the file doesn't set it
+        s.query_one("#root", Input).value = str(other)
+        await settle(pilot, app, 0.5)
+        assert "1 project," in str(s.query_one("#root-status").render())
+        switch.value = True
+        await settle(pilot, app, 0.5)
+        assert "2 projects," in str(s.query_one("#root-status").render())
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert app.cfg.nested_folders is True
+        assert "alpha/notes" in app.ptree.nodes
+    assert "nested_folders = true" in cfg_path.read_text()
+    assert saved(cfg_path)["nested_folders"] is True
+
+
+async def test_nested_folders_switch_shows_the_files_value(herdr, cfg_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    cfg_path.write_text(
+        cfg_path.read_text().replace("\n\n[utility]", "\nnested_folders = true\n\n[utility]")
+    )
+    app = CorralApp(config.load(cfg_path), herdr, config_path=cfg_path)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        assert s.query_one("#nested-folders", Switch).value is True
+
+
 async def test_add_remove_and_reorder_default_agents(app, cfg_path):
     async with app.run_test(size=(160, 50)) as pilot:
         s = await open_settings(pilot, app)

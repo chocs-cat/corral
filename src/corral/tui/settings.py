@@ -452,8 +452,9 @@ class SettingsScreen(Screen[Config | None]):
         with TabbedContent(id="tabs"):
             with TabPane("General", id="tab-general"):
                 yield Static(
-                    "corral shows every folder in the project root, and git repos nested "
-                    "below them, as a project.",
+                    "corral shows every folder in the project root as a project, and the "
+                    "git repos nested below them (or, with Nested folders on, every folder "
+                    "nested below them that isn't inside a repo).",
                     classes="note",
                 )
                 with Horizontal(classes="row"):
@@ -471,7 +472,16 @@ class SettingsScreen(Screen[Config | None]):
                     yield Label("Scan depth", classes="field")
                     yield Input(str(c.scan_depth), type="integer", id="scan-depth", classes="short")
                 yield Static(
-                    "how many levels below each project to look for nested git repos",
+                    "how many levels below each project to look for nested git repos (and "
+                    "nested folders)",
+                    classes="hint",
+                )
+                with Horizontal(classes="row"):
+                    yield Label("Nested folders", classes="field")
+                    yield Switch(c.nested_folders, id="nested-folders")
+                yield Static(
+                    "also list nested folders that aren't git repos, up to the scan depth; "
+                    "folders inside a repo stay hidden",
                     classes="hint",
                 )
             with TabPane("Agents", id="tab-agents"):
@@ -651,6 +661,7 @@ class SettingsScreen(Screen[Config | None]):
 
     @on(Input.Changed, "#root")
     @on(Input.Changed, "#scan-depth")
+    @on(Switch.Changed, "#nested-folders")
     def root_changed(self) -> None:
         self.scan_root()
 
@@ -666,7 +677,12 @@ class SettingsScreen(Screen[Config | None]):
             depth = int(self.query_one("#scan-depth", Input).value)
         except ValueError:
             depth = self.orig.scan_depth
-        probe = Config(root=root, scan_depth=depth, prune=self.orig.prune)
+        probe = Config(
+            root=root,
+            scan_depth=depth,
+            nested_folders=self.query_one("#nested-folders", Switch).value,
+            prune=self.orig.prune,
+        )
         status.update(Text("scanning…", style="dim"))
         tree = await asyncio.to_thread(projects.scan, probe)
         found = [p for p in tree.nodes.values() if not p.is_home]
@@ -1094,6 +1110,7 @@ class SettingsScreen(Screen[Config | None]):
             self.orig,
             root=Path(root_text).expanduser(),
             scan_depth=depth,
+            nested_folders=self.query_one("#nested-folders", Switch).value,
             prune=frozenset(_split_list(self.query_one("#prune", Input).value))
             | (DEFAULT_PRUNE if self.prune_extra_only else frozenset()),
             default_agents=tuple(self.default_agents),
