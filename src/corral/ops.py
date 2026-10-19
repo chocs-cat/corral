@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from corral import labels, tools
-from corral.config import Config, ConfigError
+from corral.config import Config, ConfigError, expand_user
 from corral.herdr import Herdr, HerdrError, Snapshot
 from corral.projects import agent_tabs, find_workspace, label_for, match_workspaces, scan
 
@@ -576,13 +576,12 @@ def reveal(
         orphans = (
             [w for w in snap.workspaces if w.label == target and w.id not in owned] if snap else []
         )
-        d = Path(target).expanduser().resolve()
         if len(orphans) > 1:
             err = "ambiguous: " + ", ".join(w.id for w in orphans)
         elif orphans:
             ws = orphans[0].id
-        elif d.is_dir():
-            path = str(d)
+        elif (d := expand_user(target)) is not None and d.is_dir():
+            path = str(d.resolve())
         elif snap:
             err = "not found"
         else:
@@ -592,7 +591,24 @@ def reveal(
         path = folder_of(ws)
         if not path:
             err = f"workspace {ws} has no folder"
+    return _open_folder(res, path, err, dry_run=dry_run, report=report)
 
+
+def reveal_folder(
+    path: str | Path, *, dry_run: bool = False, report: Report = _quiet
+) -> RevealResult:
+    """Open this folder in the file manager as `reveal` does, with no target
+    lookup and no herdr (DEC-25: the TUI's `r`). `target` and `workspace` stay
+    empty, so a failure is reported by its path. It doesn't check that `path`
+    is a directory: the TUI passes a scanned project's."""
+    return _open_folder(RevealResult(""), str(path), "", dry_run=dry_run, report=report)
+
+
+def _open_folder(
+    res: RevealResult, path: str, err: str, *, dry_run: bool, report: Report
+) -> RevealResult:
+    """Open `path` (unless `err` already failed the target), fill in `res` and
+    report its one line."""
     if not err:
         res.path = str(Path(path).resolve())
         res.command, err = opener_for(res.path)
@@ -606,7 +622,7 @@ def reveal(
         res.action, res.error = "failed", err
         report(f"FAILED '{res.target or res.path or '.'}' — {err}", error=True)
         return res
-    suffix = f" (workspace {ws})" if ws else ""
+    suffix = f" (workspace {res.workspace})" if res.workspace else ""
     if res.action == "opened":
         report(f"opened {res.path}{suffix}")
     else:
