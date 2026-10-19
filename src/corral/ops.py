@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import sys
+import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -205,6 +208,59 @@ def make_agent_tab(
         h.agent_focus(name)
     report(f"  added  {label} ({name}, {pane})")
     return TabResult(label, "added", agent=name, pane=pane)
+
+
+# --- the file manager (DEC-25) ------------------------------------------------
+
+OPEN_WAIT = 5.0  # seconds to wait for the opener before counting it as opened
+
+
+def opener_for(
+    path: str, platform: str | None = None, environ: Mapping[str, str] | None = None
+) -> tuple[list[str], str]:
+    """The command that opens `path` in the file manager -> (command, ""),
+    or ([], why not)."""
+    platform = sys.platform if platform is None else platform
+    environ = os.environ if environ is None else environ
+    if platform == "darwin":
+        return ["open", path], ""
+    if platform.startswith("linux"):
+        # Without a display, xdg-open can fall back to a text browser in the terminal.
+        if not (environ.get("DISPLAY") or environ.get("WAYLAND_DISPLAY")):
+            return [], "no graphical session (neither DISPLAY nor WAYLAND_DISPLAY is set)"
+        if not shutil.which("xdg-open"):
+            return [], "xdg-open not found; install xdg-utils"
+        return ["xdg-open", path], ""
+    return [], f"unsupported platform: {platform}"
+
+
+def open_detached(cmd: list[str], wait: float = OPEN_WAIT) -> str:
+    """Run an opener in its own session, sharing no stdin/stdout/stderr with
+    corral, and wait up to `wait` seconds. Returns "" when it succeeded or is
+    still running, else the error: its last line of stderr.
+
+    stderr goes to a temporary file, not a pipe: a file manager the opener
+    starts inherits it, and reading a pipe would block until that quits."""
+    with tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=err,
+                start_new_session=True,
+            )
+        except OSError as e:
+            return str(e)
+        try:
+            code = proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            return ""  # still running: count it as opened, and leave it be
+        if code == 0:
+            return ""
+        err.seek(0)
+        lines = [ln.strip() for ln in err.read().decode(errors="replace").splitlines()]
+        return next((ln for ln in reversed(lines) if ln), f"{cmd[0]} exited {code}")
 
 
 # --- commands ---------------------------------------------------------------

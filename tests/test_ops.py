@@ -1,10 +1,14 @@
+import os
 import shutil
+import sys
+import time
 from dataclasses import replace
 
 import pytest
 
 from corral import ops
 from corral.config import ConfigError
+from corral.ops import open_detached as real_open_detached  # before the autouse fixture
 
 B = "•"
 
@@ -127,3 +131,73 @@ def test_close_by_label_and_refusals(herdr, cfg, root, monkeypatch):
     assert r.agents == ["claude-sonnet-medium"]
     assert ops.close(herdr, [a], include_self=True)[0].action == "closed"
     assert a not in herdr.ws
+
+
+# --- the file manager (DEC-25) ------------------------------------------------
+
+
+def py(code: str) -> list[str]:
+    return [sys.executable, "-c", code]
+
+
+def test_open_detached_failure_reports_the_last_stderr_line():
+    code = "import sys; sys.stderr.write('first\\nlast line\\n'); sys.exit(3)"
+    assert real_open_detached(py(code)) == "last line"
+
+
+def test_open_detached_failure_without_stderr_names_the_exit():
+    assert real_open_detached(py("import sys; sys.exit(3)")) == f"{sys.executable} exited 3"
+
+
+def test_open_detached_success_ignores_stderr():
+    assert real_open_detached(py("import sys; sys.stderr.write('noise\\n')")) == ""
+
+
+def test_open_detached_still_running_counts_as_opened():
+    start = time.monotonic()
+    assert real_open_detached(py("import time; time.sleep(3)"), wait=0.2) == ""
+    assert time.monotonic() - start < 1
+
+
+def test_open_detached_runs_in_its_own_session(tmp_path):
+    out = tmp_path / "sid"
+    real_open_detached(py(f"import os; open({str(out)!r}, 'w').write(str(os.getsid(0)))"))
+    deadline = time.monotonic() + 5
+    while not (out.exists() and out.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert int(out.read_text()) != os.getsid(0)
+
+
+def test_open_detached_missing_program_is_an_error():
+    assert real_open_detached(["no-such-opener-zz", "/tmp"])
+
+
+def test_opener_for_macos():
+    assert ops.opener_for("/p", platform="darwin", environ={}) == (["open", "/p"], "")
+
+
+@pytest.mark.parametrize("env", [{"DISPLAY": ":0"}, {"WAYLAND_DISPLAY": "wayland-0"}])
+def test_opener_for_linux_desktop(monkeypatch, env):
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: "/usr/bin/xdg-open")
+    assert ops.opener_for("/p", platform="linux", environ=env) == (["xdg-open", "/p"], "")
+
+
+@pytest.mark.parametrize("env", [{}, {"DISPLAY": ""}])
+def test_opener_for_linux_without_a_display(monkeypatch, env):
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: "/usr/bin/xdg-open")
+    cmd, err = ops.opener_for("/p", platform="linux", environ=env)
+    assert cmd == []
+    assert err == "no graphical session (neither DISPLAY nor WAYLAND_DISPLAY is set)"
+
+
+def test_opener_for_linux_without_xdg_open(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None)
+    cmd, err = ops.opener_for("/p", platform="linux", environ={"DISPLAY": ":0"})
+    assert (cmd, err) == ([], "xdg-open not found; install xdg-utils")
+
+
+def test_opener_for_other_platforms():
+    assert ops.opener_for("/p", platform="win32", environ={}) == (
+        [],
+        "unsupported platform: win32",
+    )

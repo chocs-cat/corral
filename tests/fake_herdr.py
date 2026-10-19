@@ -33,6 +33,7 @@ class FakeHerdr:
         self.busy_once: set[str] = set()  # panes that report agent_pane_busy once
         self.fail_start: set[str] = set()  # agent kinds that fail to start
         self.calls: list[tuple] = []
+        self.unavailable = False  # the server isn't reachable
 
     def _id(self, prefix: str) -> str:
         return f"{prefix}{next(self._ids)}"
@@ -40,12 +41,14 @@ class FakeHerdr:
     # reads
 
     def available(self) -> bool:
-        return True
+        return not self.unavailable
 
     def agent_kinds(self) -> list[str]:
         return ["claude", "codex", "gemini"]
 
     def snapshot(self) -> Snapshot:
+        if self.unavailable:
+            raise fail("herdr_unavailable", "herdr is not running")
         return Snapshot(
             [
                 Workspace(i, w["label"], "idle", sum(1 for t in self.tabs.values() if t["ws"] == i))

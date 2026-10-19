@@ -79,6 +79,22 @@ def test_find_workspace_by_label_then_legacy_basename(herdr, root):
     assert found.id == ws2
 
 
+def test_match_workspaces_pairs_projects_as_ls_does(cfg, herdr, root, tmp_path):
+    api = root / "shop" / "api"
+    ws, _, _ = herdr.create_workspace(str(api), "shop/api")
+    legacy, _, _ = herdr.create_workspace(str(root / "shop" / "web-app"), "web-app")
+    herdr.create_workspace(str(tmp_path), "unrelated")
+    matched = projects.match_workspaces(projects.scan(cfg), herdr.snapshot())
+    assert {rel: w.id for rel, w in matched.items()} == {"shop/api": ws, "shop/web-app": legacy}
+
+
+def test_match_workspaces_finds_a_legacy_label_by_its_pane(cfg, herdr, root):
+    api = root / "shop" / "api"
+    ws, _, _ = herdr.create_workspace(str(api.resolve()), "api")
+    matched = projects.match_workspaces(projects.scan(cfg), herdr.snapshot())
+    assert {rel: w.id for rel, w in matched.items()} == {"shop/api": ws}
+
+
 def _plain_folders(root: Path) -> None:
     """Plain folders around the fixture's repos (DEC-24): nested in plain
     top-level folders, inside a repo, pruned and hidden."""

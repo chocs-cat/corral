@@ -151,11 +151,11 @@ def cmd_ls(ctx: Ctx) -> int:
     except HerdrError:
         snap, herdr_ok = None, False
 
-    rows, matched = [], set()
+    paired = projects.match_workspaces(tree, snap) if snap else {}
+    matched = {w.id for w in paired.values()}
+    rows: list[dict[str, Any]] = []
     for rel, p in tree.nodes.items():
-        ws = projects.find_workspace(snap, rel, p.path) if snap else None
-        if ws:
-            matched.add(ws.id)
+        ws = paired.get(rel)
         if a.open and not ws:
             continue
         entry = {

@@ -286,10 +286,8 @@ class CorralApp(App):
             snap, error = None, f"herdr not reachable -- start herdr ({e.message})"
         state: dict[str, NodeState] = {}
         if snap:
-            for rel, p in tree.nodes.items():
-                ws = projects.find_workspace(snap, rel, p.path)
-                if ws:
-                    state[rel] = NodeState(ws, projects.agent_tabs(snap, ws.id, self.cfg))
+            for rel, ws in projects.match_workspaces(tree, snap).items():
+                state[rel] = NodeState(ws, projects.agent_tabs(snap, ws.id, self.cfg))
         self.state = state
         # Unfold down to each open workspace -- once, so a manual fold sticks.
         for rel in state:
