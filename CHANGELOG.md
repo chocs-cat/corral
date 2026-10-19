@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/chocs-cat/corral/compare/v0.8.0...v0.9.0) (2026-10-19)
+
+
+### Features
+
+* corral reveal opens a folder in the file manager ([#49](https://github.com/chocs-cat/corral/issues/49)) ([307a606](https://github.com/chocs-cat/corral/commit/307a6066c212bbb574094ca0be19a4ff5f41c4e0))
+* **tui:** r reveals the selected project's folder ([#52](https://github.com/chocs-cat/corral/issues/52)) ([032f017](https://github.com/chocs-cat/corral/commit/032f0172b4cd7194c4f80e4aeb8306daefd3ab48))
+
 ## [0.8.0](https://github.com/chocs-cat/corral/compare/v0.7.0...v0.8.0) (2026-10-15)
 
 
