@@ -1,5 +1,6 @@
 """The operations behind every command: build a workspace, open an
-agent tab, stop agents, close workspaces.
+agent tab, stop agents, close workspaces, reveal a folder in the file
+manager.
 
 Each takes a Herdr (real or fake), reports progress lines through `report`,
 and returns a result dataclass that the CLI prints or dumps as JSON.
@@ -8,16 +9,20 @@ and returns a result dataclass that the CLI prints or dumps as JSON.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
+import subprocess
+import sys
+import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from corral import labels, tools
 from corral.config import Config, ConfigError
 from corral.herdr import Herdr, HerdrError, Snapshot
-from corral.projects import agent_tabs, find_workspace, label_for
+from corral.projects import agent_tabs, find_workspace, label_for, match_workspaces, scan
 
 Report = Callable[..., None]  # report(line, error=False)
 
@@ -79,6 +84,16 @@ class CloseResult:
     tabs: int = 0
     agents: list[str] = field(default_factory=list)
     action: str = ""  # closed | would-close | refused | failed
+    error: str = ""
+
+
+@dataclass
+class RevealResult:
+    target: str
+    path: str = ""
+    workspace: str = ""  # set when the target named, or defaulted to, a workspace
+    command: list[str] = field(default_factory=list)
+    action: str = ""  # opened | would-open | failed
     error: str = ""
 
 
@@ -205,6 +220,59 @@ def make_agent_tab(
         h.agent_focus(name)
     report(f"  added  {label} ({name}, {pane})")
     return TabResult(label, "added", agent=name, pane=pane)
+
+
+# --- the file manager (DEC-25) ------------------------------------------------
+
+OPEN_WAIT = 5.0  # seconds to wait for the opener before counting it as opened
+
+
+def opener_for(
+    path: str, platform: str | None = None, environ: Mapping[str, str] | None = None
+) -> tuple[list[str], str]:
+    """The command that opens `path` in the file manager -> (command, ""),
+    or ([], why not)."""
+    platform = sys.platform if platform is None else platform
+    environ = os.environ if environ is None else environ
+    if platform == "darwin":
+        return ["open", path], ""
+    if platform.startswith("linux"):
+        # Without a display, xdg-open can fall back to a text browser in the terminal.
+        if not (environ.get("DISPLAY") or environ.get("WAYLAND_DISPLAY")):
+            return [], "no graphical session (neither DISPLAY nor WAYLAND_DISPLAY is set)"
+        if not shutil.which("xdg-open"):
+            return [], "xdg-open not found; install xdg-utils"
+        return ["xdg-open", path], ""
+    return [], f"unsupported platform: {platform}"
+
+
+def open_detached(cmd: list[str], wait: float = OPEN_WAIT) -> str:
+    """Run an opener in its own session, sharing no stdin/stdout/stderr with
+    corral, and wait up to `wait` seconds. Returns "" when it succeeded or is
+    still running, else the error: its last line of stderr.
+
+    stderr goes to a temporary file, not a pipe: a file manager the opener
+    starts inherits it, and reading a pipe would block until that quits."""
+    with tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=err,
+                start_new_session=True,
+            )
+        except OSError as e:
+            return str(e)
+        try:
+            code = proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            return ""  # still running: count it as opened, and leave it be
+        if code == 0:
+            return ""
+        err.seek(0)
+        lines = [ln.strip() for ln in err.read().decode(errors="replace").splitlines()]
+        return next((ln for ln in reversed(lines) if ln), f"{cmd[0]} exited {code}")
 
 
 # --- commands ---------------------------------------------------------------
@@ -462,3 +530,85 @@ def close(
                 res.action, res.error = "failed", e.message
         out.append(res)
     return out
+
+
+def reveal(
+    h: Herdr,
+    cfg: Config,
+    target: str | None,
+    *,
+    dry_run: bool = False,
+    report: Report = _quiet,
+) -> RevealResult:
+    """Open a folder in the file manager (DEC-25). The target is a workspace
+    id, a project label, the label of a workspace that belongs to no project,
+    or a directory, tried in that order; with none, the workspace this runs
+    in, else the current directory. herdr is needed only to look up
+    workspaces: when it isn't reachable, those steps are skipped."""
+    try:
+        snap: Snapshot | None = h.snapshot()
+    except HerdrError:
+        snap = None
+    tree = scan(cfg)
+    matched = match_workspaces(tree, snap) if snap else {}
+    res = RevealResult(target or "")
+
+    def folder_of(ws: str) -> str:
+        """The project the workspace belongs to, else its first pane's directory."""
+        rel = next((rel for rel, w in matched.items() if w.id == ws), None)
+        if rel is not None:
+            return str(tree.nodes[rel].path)
+        return workspace_cwd(snap, ws) if snap else ""
+
+    ws, path, err = "", "", ""
+    if not target:
+        me = self_workspace()
+        if me and snap and snap.workspace(me):
+            ws = me
+        else:
+            path = str(Path.cwd())
+    elif snap and snap.workspace(target):
+        ws = target
+    elif target in tree.nodes:
+        path = str(tree.nodes[target].path)
+    else:
+        owned = {w.id for w in matched.values()}
+        orphans = (
+            [w for w in snap.workspaces if w.label == target and w.id not in owned] if snap else []
+        )
+        d = Path(target).expanduser().resolve()
+        if len(orphans) > 1:
+            err = "ambiguous: " + ", ".join(w.id for w in orphans)
+        elif orphans:
+            ws = orphans[0].id
+        elif d.is_dir():
+            path = str(d)
+        elif snap:
+            err = "not found"
+        else:
+            err = "not found; herdr isn't running, so workspaces weren't looked up"
+    if ws:
+        res.workspace = ws
+        path = folder_of(ws)
+        if not path:
+            err = f"workspace {ws} has no folder"
+
+    if not err:
+        res.path = str(Path(path).resolve())
+        res.command, err = opener_for(res.path)
+    if not err:
+        if dry_run:
+            res.action = "would-open"
+        else:
+            err = open_detached(res.command)
+            res.action = "opened"
+    if err:
+        res.action, res.error = "failed", err
+        report(f"FAILED '{res.target or res.path or '.'}' — {err}", error=True)
+        return res
+    suffix = f" (workspace {ws})" if ws else ""
+    if res.action == "opened":
+        report(f"opened {res.path}{suffix}")
+    else:
+        report(f"would open {res.path}: {shlex.join(res.command)}{suffix}")
+    return res

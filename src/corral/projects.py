@@ -201,6 +201,17 @@ def find_workspace(snap: Snapshot, label: str, path: Path | None = None) -> Work
     return None
 
 
+def match_workspaces(tree: Tree, snap: Snapshot) -> dict[str, Workspace]:
+    """Each project that has a workspace -> that workspace, in tree order.
+    This is how `ls` and the TUI pair projects with workspaces."""
+    out = {}
+    for rel, p in tree.nodes.items():
+        ws = find_workspace(snap, rel, p.path)
+        if ws:
+            out[rel] = ws
+    return out
+
+
 @dataclass
 class AgentTab:
     tab_id: str

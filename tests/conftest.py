@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from corral import config, harnesses
+from corral import config, harnesses, ops
 from corral.config import Config, Utility
 from tests.fake_herdr import FakeHerdr
 
@@ -60,6 +62,33 @@ def _no_harness_versions(monkeypatch):
     the network for the latest ones."""
     monkeypatch.setattr(harnesses, "version", lambda name: None)
     monkeypatch.setattr(harnesses, "_fetch_json", lambda url: None)
+
+
+@dataclass
+class Opener:
+    """Stands in for ops.open_detached: records each command, returns `result`."""
+
+    calls: list[list[str]] = field(default_factory=list)
+    result: str = ""
+
+    def __call__(self, cmd: list[str], wait: float = ops.OPEN_WAIT) -> str:
+        self.calls.append(cmd)
+        return self.result
+
+
+@pytest.fixture(autouse=True)
+def opener(monkeypatch) -> Opener:
+    """No test opens a file manager. Tests of the real ops.open_detached
+    import it under another name before this replaces it."""
+    rec = Opener()
+    monkeypatch.setattr(ops, "open_detached", rec)
+    return rec
+
+
+@pytest.fixture
+def mac(monkeypatch) -> None:
+    """Run as on macOS, whatever CI runs on."""
+    monkeypatch.setattr(sys, "platform", "darwin")
 
 
 @pytest.fixture(autouse=True)

@@ -20,7 +20,7 @@ The code is laid out in layers, each depending only on the ones above it:
 | `projects.py` | scanning the root, workspace matching |
 | `tools.py` | the utility tab's programs (yazi, lazygit): status and installing them |
 | `harnesses.py` | the agent CLIs (Claude Code, Codex): versions, install method, upgrading them |
-| `ops.py` | the operations: `up`, `tab`, `stop`, `close` |
+| `ops.py` | the operations: `up`, `tab`, `stop`, `close`, `reveal` |
 | `cli.py` | argparse front end, human and `--json` output |
 | `tui/app.py` | the Textual app; calls `ops` in worker threads |
 | `tui/dialogs.py` | modal dialogs: agent picker, stop picker, confirm |
