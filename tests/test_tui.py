@@ -1,6 +1,6 @@
 """Drive the TUI headlessly against the fake herdr."""
 
-from textual.widgets import DataTable
+from textual.widgets import DataTable, RichLog
 from textual.widgets._header import HeaderTitle
 
 from corral import ops
@@ -160,3 +160,69 @@ async def test_main_screen_keys_do_nothing_behind_a_dialog(herdr, cfg):
         assert isinstance(app.screen, AgentPicker)
         assert app.is_running
         assert ws in herdr.ws
+
+
+async def test_reveal_opens_the_folder_on_every_kind_of_row(mac, herdr, cfg, root, home, opener):
+    ops.up(herdr, cfg, root / "courses")
+    app = CorralApp(cfg, herdr)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        for rel, path in [
+            ("courses", root / "courses"),  # open
+            ("scratch", root / "scratch"),  # closed
+            ("~", home),
+            ("Archive", root / "Archive"),  # a plain folder
+        ]:
+            app.move_to(rel)
+            await pilot.press("r")
+            await settle(pilot, app)
+            assert opener.calls[-1] == ["open", str(path.resolve())]
+        assert len(opener.calls) == 4
+
+
+async def test_reveal_works_without_herdr(mac, herdr, cfg, root, opener):
+    herdr.unavailable = True
+    app = CorralApp(cfg, herdr)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        app.move_to("scratch")
+        await pilot.press("r")
+        await settle(pilot, app)
+        assert opener.calls == [["open", str((root / "scratch").resolve())]]
+
+
+async def test_reveal_failure_notifies(mac, herdr, cfg, root, opener, monkeypatch):
+    opener.result = "boom"
+    app = CorralApp(cfg, herdr)
+    notes = []
+    monkeypatch.setattr(app, "notify", lambda message, **kw: notes.append((message, kw)))
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        app.move_to("scratch")
+        await pilot.press("r")
+        await settle(pilot, app)
+        assert ("boom", {"title": "Couldn't reveal scratch", "severity": "error"}) in notes
+        # The log wraps the long line, so compare without whitespace.
+        log = "".join("".join(line.text.split()) for line in app.query_one("#log", RichLog).lines)
+        path = (root / "scratch").resolve()
+        assert log.endswith("".join(f"$ reveal scratch FAILED '{path}' — boom failed".split()))
+
+
+async def test_reveal_does_nothing_behind_another_screen(mac, herdr, cfg, opener):
+    ops.up(herdr, cfg, cfg.root / "courses")
+    app = CorralApp(cfg, herdr)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await settle(pilot, app)
+        app.move_to("courses")
+        await pilot.press("a")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, AgentPicker)
+        await pilot.press("r")
+        await pilot.pause(0.3)
+        assert opener.calls == []
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        await pilot.press("comma")
+        await pilot.pause(0.3)
+        assert len(app.screen_stack) > 1
+        assert not app.check_action("reveal", ())

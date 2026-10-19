@@ -32,7 +32,7 @@ workspace w2 'blog' -> /Users/you/Code/blog
 ready: w2
   done
 ────────────────────────────────────────────────────────────────────────────────────────────────
-space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  / Filter  g Refresh  U Upgrades  , Settings
+space Fold  o Open  a Add agent  u Utility  s Stop  x Close WS  r Reveal  / Filter  g Refresh  U Upgrades  , Settings
 ```
 
 ## Install
@@ -146,6 +146,7 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 | `u` | open with only the utility tab (switches to an existing workspace) |
 | `s` | stop running agents (pick them) |
 | `x` | close the workspace: shows what goes with it, runs on `y` |
+| `r` | reveal: open the folder in Finder (xdg-open on Linux), with or without a workspace |
 | `→` `←` space | unfold / fold / toggle the tree |
 | `/` `g` `q` | filter, refresh, quit |
 | `U` | upgrades: Claude Code's and Codex's versions, and upgrading them |

@@ -126,6 +126,7 @@ class CorralApp(App):
         Binding("u", "utility", "Utility"),
         Binding("s", "stop", "Stop"),
         Binding("x", "close_ws", "Close WS"),
+        Binding("r", "reveal", "Reveal"),
         Binding("slash", "filter", "Filter"),
         Binding("g", "rescan", "Refresh"),
         Binding("U", "upgrades", "Upgrades"),
@@ -209,8 +210,8 @@ class CorralApp(App):
     # App bindings apply on every screen, so without this, `x` pressed in a
     # dialog or in Settings would act on the project list behind it.
     MAIN_SCREEN_ACTIONS = frozenset(
-        {"open", "add_agent", "utility", "stop", "close_ws", "filter", "rescan",
-         "clear_filter", "upgrades", "settings", "quit"}
+        {"open", "add_agent", "utility", "stop", "close_ws", "reveal", "filter",
+         "rescan", "clear_filter", "upgrades", "settings", "quit"}
     )  # fmt: skip
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
@@ -703,6 +704,26 @@ class CorralApp(App):
             )
         ):
             self.run_op(p.rel, f"close {ws.id}", ops.close, [ws.id])
+
+    def action_reveal(self) -> None:
+        # Revealing changes nothing in herdr, so a busy row or one without a
+        # workspace is fine: no target() check (DEC-25).
+        if p := self.current():
+            self.reveal_row(p)
+
+    @work(group="reveal")
+    async def reveal_row(self, p: Project) -> None:
+        """Open the row's folder in the file manager, straight from its path
+        (DEC-25). Not run_op: reveal_folder returns a failure instead of
+        raising, and herdr needs no refresh afterwards."""
+        log = self.query_one("#log", RichLog)
+        log.write(Text(f"$ reveal {p.rel}", style="bold"))
+        res = await asyncio.to_thread(ops.reveal_folder, p.path, report=self._reporter())
+        if res.action == "failed":
+            log.write(Text("  failed", style="red"))
+            self.notify(res.error, title=f"Couldn't reveal {p.rel}", severity="error")
+        else:
+            log.write(Text("  done", style="green"))
 
 
 def _git_dirty_count(path: Path) -> int:
