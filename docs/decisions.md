@@ -240,3 +240,49 @@ lead to them, are listed there.
 Off by default, so an existing root's list doesn't grow unasked. Top-level
 folders, `~` and `corral up DIR` already accepted any directory and don't
 change. (#39)
+
+## DEC-25: corral reveal opens a project's folder in the file manager (2026-10)
+
+`corral reveal [TARGET]` (the TUI's `r`) opens a folder in the system's file
+manager. It opens the folder itself (macOS `open DIR`, not `open -R`), using
+whatever the system has set as the default folder handler:
+
+- macOS: `open DIR`.
+- Linux: `xdg-open DIR`, only in a graphical session (`DISPLAY` or
+  `WAYLAND_DISPLAY` set). Without one, xdg-open can fall back to a text
+  browser in the terminal, so corral fails instead. A missing `xdg-open`
+  fails too, naming xdg-utils.
+- Anywhere else it fails as unsupported.
+
+There is no setting for another file manager (#47).
+
+The target is resolved in this order, so one argument covers everything
+`ls` shows:
+
+1. A workspace id.
+2. A project label as `ls` lists it (`shop/api`, `~`), whether or not the
+   project has a workspace.
+3. The exact label of a workspace that belongs to no project. A label
+   several such workspaces share is refused, as `close` refuses it.
+4. A directory path (`~/…` expanded, relative to the current directory).
+
+With no target, it reveals the workspace corral runs in
+(`$HERDR_WORKSPACE_ID`), else the current directory. A workspace's folder is
+the path of the project it belongs to (matched the way `ls` matches them),
+else its first pane's directory. herdr is needed only to look up a
+workspace. When herdr isn't reachable, steps 1 and 3 and the
+`$HERDR_WORKSPACE_ID` default are skipped, and a target found no other way
+fails with a message saying herdr isn't running. `reveal` never exits 3.
+
+A target that resolves to nothing, an unsupported platform and an opener
+that fails all count as a failed target (exit 1). The opener runs detached
+from corral's terminal (its own session, with no stdin, stdout or stderr
+shared with corral) so it can't draw over the TUI. corral waits up to five
+seconds: a non-zero exit is a failure reported with the opener's last line
+of stderr, and one still running then counts as opened. `--dry-run`
+resolves the folder and the command without running it. The result is
+`{target, path, workspace, command, action, error}`, with `action` one of
+`opened`, `would-open` or `failed`.
+
+The TUI's `r` reveals the selected project's path directly, with or without
+a workspace. (#46)
