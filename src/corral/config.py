@@ -496,6 +496,15 @@ def tilde(path: Path) -> str:
         return str(path)
 
 
+def expand_user(path: str | Path) -> Path | None:
+    """path with a leading ~ or ~name expanded, not resolved; None when ~name
+    names no user. Callers turn None into their own failure (#50)."""
+    try:
+        return Path(path).expanduser()
+    except RuntimeError:
+        return None
+
+
 def to_data(cfg: Config) -> dict:
     """cfg as TOML data -- the inverse of from_dict."""
     u = cfg.utility

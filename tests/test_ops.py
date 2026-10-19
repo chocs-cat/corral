@@ -335,6 +335,26 @@ def test_reveal_without_herdr(mac, herdr, cfg, root, tmp_path, monkeypatch, open
     )
 
 
+def test_reveal_unknown_user_is_not_found(mac, herdr, cfg, tmp_path, monkeypatch, opener):
+    monkeypatch.chdir(tmp_path)
+    res = ops.reveal(herdr, cfg, "~nosuchuser-zz")
+    assert (res.action, res.error) == ("failed", "not found")
+    herdr.unavailable = True
+    res = ops.reveal(herdr, cfg, "~nosuchuser-zz")
+    assert (res.action, res.error) == (
+        "failed",
+        "not found; herdr isn't running, so workspaces weren't looked up",
+    )
+    assert opener.calls == []
+
+
+def test_reveal_orphan_label_like_an_unknown_user(mac, herdr, cfg, tmp_path):
+    (tmp_path / "elsewhere").mkdir()
+    ws, _, _ = herdr.create_workspace(str(tmp_path / "elsewhere"), "~nosuchuser-zz")
+    res = ops.reveal(herdr, cfg, "~nosuchuser-zz")
+    assert (res.action, res.path, res.workspace) == ("opened", real(tmp_path / "elsewhere"), ws)
+
+
 def test_reveal_on_linux_uses_xdg_open(herdr, cfg, root, monkeypatch, opener):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("DISPLAY", ":0")

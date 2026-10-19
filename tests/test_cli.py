@@ -120,6 +120,12 @@ def test_reveal_not_found_fails(run, mac, tmp_path, monkeypatch, capsys):
     assert "FAILED 'ghost' — not found" in capsys.readouterr().err
 
 
+def test_reveal_unknown_user_fails(run, mac, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert run("reveal", "~nosuchuser-zz") == cli.EXIT_FAILED
+    assert "FAILED '~nosuchuser-zz' — not found" in capsys.readouterr().err
+
+
 def test_reveal_dry_run_defaults_to_the_cwd(run, mac, opener, tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     assert run("reveal", "--dry-run", "--json") == 0

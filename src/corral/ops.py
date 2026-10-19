@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from corral import labels, tools
-from corral.config import Config, ConfigError
+from corral.config import Config, ConfigError, expand_user
 from corral.herdr import Herdr, HerdrError, Snapshot
 from corral.projects import agent_tabs, find_workspace, label_for, match_workspaces, scan
 
@@ -576,13 +576,12 @@ def reveal(
         orphans = (
             [w for w in snap.workspaces if w.label == target and w.id not in owned] if snap else []
         )
-        d = Path(target).expanduser().resolve()
         if len(orphans) > 1:
             err = "ambiguous: " + ", ".join(w.id for w in orphans)
         elif orphans:
             ws = orphans[0].id
-        elif d.is_dir():
-            path = str(d)
+        elif (d := expand_user(target)) is not None and d.is_dir():
+            path = str(d.resolve())
         elif snap:
             err = "not found"
         else:

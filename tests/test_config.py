@@ -278,3 +278,9 @@ def test_hiding_everything_is_refused(tmp_path):
     f.write_text(f"default_agents = []\nhide_models = {json.dumps(keys)}\n")
     with pytest.raises(ConfigError, match="at least one model"):
         config.load_file(f)
+
+
+def test_expand_user(home):
+    assert config.expand_user("~/x") == home / "x"
+    assert config.expand_user(Path("rel/x")) == Path("rel/x")
+    assert config.expand_user("~nosuchuser-zz/x") is None
