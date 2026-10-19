@@ -119,9 +119,9 @@ that resolves to nothing, an unsupported platform or a failed opener exits 1.
 The result is one object, `{target, path, workspace, command, action,
 error}`. `action` is `opened`, `would-open` or `failed`; `path` is the
 resolved folder (`""` when none was found) and `command` the opener
-(`["open", path]`, or `[]` when there is none). `workspace` is the id of the workspace the target named or
-defaulted to, and `""` for a project label or a path, even when that project
-has a workspace.
+(`["open", path]`, or `[]` when there is none). `workspace` is the id of the
+workspace the target named or defaulted to, and `""` for a project label or a
+path, even when that project has a workspace.
 
 It opens a window on the user's desktop: on Linux it needs a graphical
 session, and on macOS over SSH it opens Finder on the Mac's own screen. Use
