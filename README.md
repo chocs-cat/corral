@@ -111,6 +111,7 @@ corral tab opus/high                    # an agent tab in the workspace you're i
 corral tab sonnet --new                 # another one: Sonnet•medium-2
 corral stop "Opus•high"                 # by tab label, agent name or pane id
 corral close courses --dry-run          # what closing would take with it
+corral reveal shop/api                  # open its folder in Finder (xdg-open on Linux)
 corral ls                               # projects, workspaces, agents
 corral models                           # the models and their effort levels
 corral harnesses upgrade                # upgrade Claude Code and Codex

@@ -1,6 +1,6 @@
 ---
 name: corral
-description: Drive herdr project workspaces with the `corral` CLI — build a workspace for a project (a utility tab plus model/effort agent tabs), open more agent tabs ("give me an Opus high tab", "another Sonnet in courses"), stop agents, close whole workspaces, and list which projects have workspaces and what their agents are doing. Use this whenever the user wants to open, set up, launch or get started on a project in herdr, says "open X in herdr" or "set me up for Y", asks for a new agent tab or pane with a given model/effort, wants to stop an agent or close a workspace, asks what is running where, or wants a herdr agent prompted at a later time. Also covers upgrading Claude Code and Codex through corral, corral's config (~/.config/corral/config.toml) and the herdr workspace-trust prompt.
+description: Drive herdr project workspaces with the `corral` CLI — build a workspace for a project (a utility tab plus model/effort agent tabs), open more agent tabs ("give me an Opus high tab", "another Sonnet in courses"), stop agents, close whole workspaces, open a project's folder in Finder or the Linux file manager, and list which projects have workspaces and what their agents are doing. Use this whenever the user wants to open, set up, launch or get started on a project in herdr, says "open X in herdr" or "set me up for Y", asks for a new agent tab or pane with a given model/effort, wants to stop an agent or close a workspace, asks what is running where, or wants a herdr agent prompted at a later time. Also covers upgrading Claude Code and Codex through corral, corral's config (~/.config/corral/config.toml) and the herdr workspace-trust prompt.
 ---
 
 # corral
@@ -94,6 +94,38 @@ refuses a label that several workspaces share, and refuses the workspace you
 are running in unless `--include-self` is passed. Don't close anything the
 user didn't ask you to close. Their own sessions, possibly including yours,
 live in these workspaces.
+
+## Revealing a folder
+
+```sh
+corral reveal shop/api --json               # a project's folder, in Finder / xdg-open
+corral reveal w5 --json                     # the folder of workspace w5
+corral reveal --dry-run --json              # which folder and command, without opening
+```
+
+`reveal` opens a folder in the system file manager. The target is tried, in
+order, as a workspace id, a project label as `ls` lists it (`shop/api`, `~`),
+the exact label of a workspace that belongs to no project (refused when
+several share it, as `close` refuses), then a directory path (`~` expanded,
+relative paths from the current directory). With no target it reveals the
+workspace you are running in (`$HERDR_WORKSPACE_ID`), else the current
+directory. A workspace's folder is its project's path, else its first pane's
+directory.
+
+It works with herdr down: then only paths and project labels resolve, and a
+workspace target fails saying herdr isn't running. It never exits 3; a target
+that resolves to nothing, an unsupported platform or a failed opener exits 1.
+
+The result is one object, `{target, path, workspace, command, action,
+error}`. `action` is `opened`, `would-open` or `failed`; `path` is the
+resolved folder (`""` when none was found) and `command` the opener
+(`["open", path]`, or `[]` when there is none). `workspace` is the id of the workspace the target named or
+defaulted to, and `""` for a project label or a path, even when that project
+has a workspace.
+
+It opens a window on the user's desktop: on Linux it needs a graphical
+session, and on macOS over SSH it opens Finder on the Mac's own screen. Use
+it only when the user asks to see a folder.
 
 ## Configuration
 

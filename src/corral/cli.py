@@ -5,6 +5,7 @@
     corral tab SPEC... ...      open agent tab(s)
     corral stop TARGET... ...   stop agents
     corral close WS... ...      close whole workspaces
+    corral reveal [TARGET]      open a folder in the file manager
     corral ls ...               projects, their workspaces and agents
     corral models               the models and their effort levels
     corral tools [install]      the utility tab's programs; install yazi/lazygit
@@ -139,6 +140,14 @@ def cmd_close(ctx: Ctx) -> int:
     )
     ctx.emit(res)
     return EXIT_OK if all(r.action in ("closed", "would-close") for r in res) else EXIT_FAILED
+
+
+def cmd_reveal(ctx: Ctx) -> int:
+    a = ctx.args
+    # No need_herdr: reveal works without herdr, skipping the workspace lookups (DEC-25).
+    res = ops.reveal(ctx.herdr, ctx.cfg, a.target, dry_run=a.dry_run, report=ctx.report)
+    ctx.emit(res)
+    return EXIT_FAILED if res.action == "failed" else EXIT_OK
 
 
 def cmd_ls(ctx: Ctx) -> int:
@@ -499,6 +508,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cl.add_argument("-n", "--dry-run", action="store_true", help="report only")
     cl.set_defaults(func=cmd_close)
+
+    rv = sub.add_parser(
+        "reveal",
+        parents=[common],
+        help="open a folder in the file manager",
+        description="Open a folder in the file manager (Finder on macOS, xdg-open in a "
+        "Linux desktop session). TARGET is a workspace id, a project label as `ls` "
+        "lists it, the label of a workspace that belongs to no project, or a directory, "
+        "tried in that order. Default: the workspace you're in, else the current "
+        "directory. Works without herdr running.",
+    )
+    rv.add_argument("target", nargs="?")
+    rv.add_argument(
+        "-n", "--dry-run", action="store_true", help="print the folder and command only"
+    )
+    rv.set_defaults(func=cmd_reveal)
 
     ls = sub.add_parser("ls", parents=[common], help="projects, workspaces and agents")
     ls.add_argument("--open", action="store_true", help="only projects with a workspace")
