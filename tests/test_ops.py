@@ -403,3 +403,40 @@ def test_reveal_reports_one_line(mac, herdr, cfg, root, opener):
         ("FAILED 'ghost' — not found", True),
         (f"FAILED '{real(Path.cwd())}' — boom", True),
     ]
+
+
+def test_reveal_folder_opens_the_folder(mac, root, opener):
+    lines = []
+    report = lambda line, error=False: lines.append((line, error))  # noqa: E731
+    courses = real(root / "courses")
+    res = ops.reveal_folder(root / "courses", report=report)
+    assert (res.action, res.path, res.target, res.workspace) == ("opened", courses, "", "")
+    assert opener.calls == [["open", courses]]
+    assert lines == [(f"opened {courses}", False)]
+
+
+def test_reveal_folder_dry_run_runs_nothing(mac, root, opener):
+    lines = []
+    report = lambda line, error=False: lines.append((line, error))  # noqa: E731
+    courses = real(root / "courses")
+    res = ops.reveal_folder(root / "courses", dry_run=True, report=report)
+    assert (res.action, res.command) == ("would-open", ["open", courses])
+    assert opener.calls == []
+    assert lines == [(f"would open {courses}: open {courses}", False)]
+
+
+def test_reveal_folder_opener_failure(mac, root, opener):
+    lines = []
+    report = lambda line, error=False: lines.append((line, error))  # noqa: E731
+    courses = real(root / "courses")
+    opener.result = "boom"
+    res = ops.reveal_folder(root / "courses", report=report)
+    assert (res.action, res.error) == ("failed", "boom")
+    assert lines == [(f"FAILED '{courses}' — boom", True)]
+
+
+def test_reveal_folder_unsupported_platform(root, monkeypatch, opener):
+    monkeypatch.setattr(sys, "platform", "win32")
+    res = ops.reveal_folder(root / "courses")
+    assert (res.action, res.error) == ("failed", "unsupported platform: win32")
+    assert opener.calls == []
