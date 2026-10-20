@@ -143,7 +143,9 @@ said it, and cite the entry at the code site.
   on Linux and macOS with Python 3.11 to 3.13, plus a packaging check the
   gate leaves out. A single gate command is #37.
 - **CI:** `.github/workflows/ci.yml` runs the gate on pull requests,
-  including drafts; pushes to `master` run it too. `master` requires the
+  including drafts, except those that only touch `docs/`, where
+  **CI passed** reports success without running it; pushes to `master`
+  run it too. `master` requires the
   **CI passed** and **conventional commit titles** checks.
 - **Releases:** release-please (DEC-13): a chunk pull request's title is a
   Conventional Commit for the chunk's user-visible effect, and nobody edits
