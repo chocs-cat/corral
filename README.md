@@ -105,6 +105,7 @@ already running keep their version until restarted.
 
 ```sh
 corral                                  # the TUI
+corral --fresh                          # start over: close every workspace, open Control Center
 corral up ~/Code/api                    # build the workspace, or focus it if it exists
 corral up ~/Code/api --agent opus/high --agent sol/xhigh
 corral tab opus/high                    # an agent tab in the workspace you're in
@@ -121,6 +122,17 @@ Every command takes `--json`: the result goes to stdout as JSON, progress to
 stderr. Exit codes: `0` ok, `1` a target failed, `2` usage/config error, `3`
 herdr not running. `--json`, `--root` and `--config` go before or after the
 command (`corral --root ~/Work ls`).
+
+### Starting fresh
+
+`corral --fresh`, run from a plain terminal, starts herdr over. It starts the
+herdr server if it isn't running, builds a `Control Center` workspace in your
+home directory with one `Corral` tab running the TUI, closes every other
+workspace, and attaches to herdr with Control Center focused. When an agent
+is working or blocked, it names them and asks before changing anything;
+`--yes` skips the question. `--dry-run` shows what it would do and changes
+nothing. It refuses to run inside herdr. Nothing it closes comes back: corral
+doesn't restore workspaces.
 
 ### Projects and labels
 
