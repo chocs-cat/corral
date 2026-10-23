@@ -286,3 +286,56 @@ resolves the folder and the command without running it. The result is
 
 The TUI's `r` reveals the selected project's path directly, with or without
 a workspace. (#46)
+
+## DEC-26: corral --fresh starts herdr over with one Control Center workspace (2026-10)
+
+`corral --fresh` is for a person at a plain terminal who wants to start
+over: herdr running, every old workspace gone, and one workspace from which
+to open the rest. In order, it:
+
+1. **Refuses inside herdr** (`$HERDR_WORKSPACE_ID` set, or `HERDR_ENV=1`),
+   exit 2, before touching anything: it would close its own workspace and
+   then attach herdr inside herdr.
+2. **Starts the herdr server** when it isn't reachable: `herdr server`,
+   detached from corral's terminal (its own session, no stdin, stdout or
+   stderr shared), then waits up to ten seconds for herdr to answer.
+   `herdr` not on PATH, or a server that doesn't answer in time, exits 3.
+3. **Reads every workspace** and the agents in them. When any agent is
+   `working` or `blocked`, it lists those agents and asks `y/N` before
+   changing anything; `--yes` skips the question. Idle, done and exited
+   agents don't prompt. Declining changes nothing (exit 1), and so does a
+   run that would have to ask but can't: no terminal on stdin, or
+   `--json`, without `--yes`.
+4. **Builds the new workspace first**: labelled `Control Center`, in the
+   home directory, with one tab labelled `Corral` whose pane runs corral's
+   TUI, then focuses it. Building before closing means herdr is never left
+   with no workspace, and a build that fails closes nothing (exit 1).
+5. **Closes every other workspace** read in step 3, by id, an earlier
+   Control Center included. A close that fails is reported and the rest
+   still close; the run exits 1.
+6. **Attaches**: when stdin and stdout are terminals and `--json` isn't
+   given, corral replaces itself with `herdr`, so the terminal shows the
+   session with Control Center focused. Otherwise, or when a step failed,
+   it reports the result and exits.
+
+The `Corral` tab runs `corral` from PATH, else the running interpreter with
+`-m corral`. It gets `--root` when this run's root was overridden (`--root`
+or `$CORRAL_ROOT`) and `--config` when the file was chosen (`--config` or
+`$CORRAL_CONFIG`), since a pane started by an already-running server
+doesn't inherit corral's environment. Quitting the TUI leaves a shell in the
+tab.
+
+The label is not `~`: that would make Control Center the home project's
+workspace, so opening `~` would focus a one-tab workspace instead of
+building the usual one. Control Center belongs to no project and `ls` lists
+it under `other_workspaces`.
+
+`--dry-run` changes nothing and doesn't start the server; it reports
+whether the server would start, the workspace it would build and the
+workspaces it would close. `--yes` and `--dry-run` without `--fresh`, and
+`--fresh` with a command, are usage errors (exit 2). The `--json` result is
+one object, `{action, started_server, workspace, tab, running, closed,
+error}`: `action` is `reset`, `would-reset`, `cancelled` or `failed`;
+`workspace` and `tab` are the new ids (`""` in a dry run); `running` names
+the working or blocked agents; `closed` holds a `close` result per
+workspace. There is no TUI key for it, and agents don't run it. (#56)
