@@ -95,6 +95,15 @@ are running in unless `--include-self` is passed. Don't close anything the
 user didn't ask you to close. Their own sessions, possibly including yours,
 live in these workspaces.
 
+## Starting fresh
+
+`corral --fresh` is the user's reset button: it closes every workspace and
+leaves one, `Control Center`, with a `Corral` tab running the TUI. Don't run
+it. It refuses inside herdr, and it would close everything, yours included.
+When the user wants to start over, tell them to run `corral --fresh` from a
+plain terminal (`--dry-run` first shows what it would close). Control Center
+belongs to no project: `corral ls --json` lists it under `other_workspaces`.
+
 ## Revealing a folder
 
 ```sh

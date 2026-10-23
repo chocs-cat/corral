@@ -221,7 +221,17 @@ def test_start_server_when_already_running_starts_nothing(server_stub):
 
 def test_start_server_starts_a_detached_server_and_polls(server_stub, monkeypatch):
     monkeypatch.setenv("STUB_SERVER_DELAY", "0.3")
-    assert Herdr().start_server() is True
+    # pytest's stdin is often /dev/null already, which would pass the stdin
+    # check below whether or not start_server detaches it: use a pipe (#59).
+    r, w = os.pipe()
+    saved = os.dup(0)
+    os.dup2(r, 0)
+    try:
+        assert Herdr().start_server() is True
+    finally:
+        os.dup2(saved, 0)
+        for fd in (r, w, saved):
+            os.close(fd)
     calls = server_stub.calls()
     assert calls[0] == ["status"]
     assert calls.count(["server"]) == 1
