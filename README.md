@@ -130,7 +130,8 @@ herdr server if it isn't running, builds a `Control Center` workspace in your
 home directory with one `Corral` tab running the TUI, closes every other
 workspace, and attaches to herdr with Control Center focused. When an agent
 is working or blocked, it names them and asks before changing anything;
-`--yes` skips the question. `--dry-run` shows what it would do and changes
+`--yes` skips the question. With `--json`, or no terminal to ask on, it
+can't ask, so it stops there (exit 1) unless `--yes` is given. `--dry-run` shows what it would do and changes
 nothing. It refuses to run inside herdr. Nothing it closes comes back: corral
 doesn't restore workspaces.
 
