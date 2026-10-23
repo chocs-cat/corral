@@ -71,6 +71,10 @@ a bug, stopped and closed the user's real workspace. So:
   any stop or close. Never take a target from a listing.
 - Use a scratch root (`--root`), never the user's real one.
 - Never close or stop a workspace, tab or agent you didn't create.
+- Never run `corral --fresh` against a real herdr, live or in a test: it
+  closes every workspace in the server it reaches. `ops.fresh` is tested
+  with FakeHerdr, and starting the server with the stub executable, which
+  never starts a real one.
 - A claude agent started in a new directory waits at its trust prompt
   (herdr status `blocked`). That's expected in a scratch root.
 
