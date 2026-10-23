@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/chocs-cat/corral/compare/v0.9.0...v0.10.0) (2026-10-23)
+
+
+### Features
+
+* **cli:** corral --fresh starts herdr over with one Control Center workspace ([#60](https://github.com/chocs-cat/corral/issues/60)) ([07160b5](https://github.com/chocs-cat/corral/commit/07160b5786747d10feedaae121f59e0926be1cf1)), closes [#56](https://github.com/chocs-cat/corral/issues/56) [#59](https://github.com/chocs-cat/corral/issues/59)
+
 ## [0.9.0](https://github.com/chocs-cat/corral/compare/v0.8.0...v0.9.0) (2026-10-19)
 
 
