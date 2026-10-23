@@ -1,6 +1,7 @@
 """corral command line.
 
     corral                      the TUI (on a terminal), else help
+    corral --fresh [-y] [-n]    start over with one Control Center workspace
     corral up [DIR] ...         build / focus a project workspace
     corral tab SPEC... ...      open agent tab(s)
     corral stop TARGET... ...   stop agents
@@ -23,8 +24,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
+import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -407,6 +411,75 @@ def cmd_tui(ctx: Ctx) -> int:
     return EXIT_OK
 
 
+def _on_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _tui_command(ctx: Ctx) -> str:
+    """The command the Corral tab runs (DEC-26): corral from PATH, else this
+    interpreter, with --root and --config when this run chose them, since a
+    pane the server starts doesn't inherit this environment. Paths are
+    absolute: the pane starts in ~, not here."""
+    a = ctx.args
+    argv = ["corral"] if shutil.which("corral") else [sys.executable, "-m", "corral"]
+    if config.root_override(a.root):
+        argv += ["--root", str(ctx.cfg.root.absolute())]
+    if a.config or os.environ.get("CORRAL_CONFIG"):
+        path = Path(a.config).expanduser() if a.config else config.config_path()
+        argv += ["--config", str(path.absolute())]
+    return shlex.join(argv)
+
+
+def _confirm(ctx: Ctx) -> Callable[[list[str]], bool]:
+    """Ask before closing working or blocked agents (DEC-26 step 3). --yes
+    skips the question; with --json, or no terminal on stdin, it can't be
+    asked, so the answer is no."""
+
+    def confirm(running: list[str]) -> bool:
+        names = ", ".join(running)
+        if ctx.args.fresh_yes:
+            return True
+        if ctx.json or not sys.stdin.isatty():
+            ctx.report(
+                f"{names} working or blocked; rerun with --yes to close them anyway", error=True
+            )
+            return False
+        print(
+            f"{names} working or blocked. Close every workspace anyway? [y/N] ",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+    return confirm
+
+
+def cmd_fresh(ctx: Ctx) -> int:
+    # No need_herdr: ops.fresh starts the server when it isn't running.
+    res = ops.fresh(
+        ctx.herdr,
+        confirm=_confirm(ctx),
+        tui_command=_tui_command(ctx),
+        dry_run=ctx.args.fresh_dry_run,
+        report=ctx.report,
+    )
+    ctx.emit(res)
+    if res.action in ("cancelled", "failed"):
+        return EXIT_FAILED
+    if res.action == "reset" and not ctx.json and _on_terminal():
+        # DEC-26 step 6: become herdr, which shows Control Center focused.
+        ctx.report("attaching to herdr")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        try:
+            os.execvp(ctx.herdr.binary, [ctx.herdr.binary])
+        except OSError as e:
+            ctx.report(f"FAILED to attach: {e}", error=True)
+            return EXIT_FAILED
+    return EXIT_OK
+
+
 # --- parser -----------------------------------------------------------------
 
 
@@ -434,9 +507,30 @@ def build_parser() -> argparse.ArgumentParser:
         prog="corral",
         parents=[_common_options(top=True)],
         description="Round up your projects into herdr workspaces. With no command on a "
-        "terminal, opens the TUI.",
+        "terminal, opens the TUI; `--fresh` starts herdr over.",
     )
     p.add_argument("--version", action="version", version=f"corral {__version__}")
+    # Own dests: a subcommand's `dry_run` default would overwrite a shared one.
+    p.add_argument(
+        "--fresh",
+        action="store_true",
+        help="start over: start herdr if needed, open a Control Center workspace running "
+        "corral, close every other workspace, attach",
+    )
+    p.add_argument(
+        "-y",
+        "--yes",
+        dest="fresh_yes",
+        action="store_true",
+        help="--fresh: don't ask, even when agents are working or blocked",
+    )
+    p.add_argument(
+        "-n",
+        "--dry-run",
+        dest="fresh_dry_run",
+        action="store_true",
+        help="--fresh: report what would happen, change nothing",
+    )
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
 
     up = sub.add_parser(
@@ -592,8 +686,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.command:
-        if sys.stdin.isatty() and sys.stdout.isatty():
+    if args.fresh and args.command:
+        parser.error("--fresh takes no command")
+    if (args.fresh_yes or args.fresh_dry_run) and not args.fresh:
+        parser.error("--yes and --dry-run before a command go with --fresh")
+    if args.fresh:
+        args.func = cmd_fresh
+    elif not args.command:
+        if _on_terminal():
             args.func = cmd_tui
         else:
             parser.print_help()

@@ -23,6 +23,8 @@ def fail(code: str, message: str) -> HerdrError:
 
 
 class FakeHerdr:
+    binary = "herdr"
+
     def __init__(self) -> None:
         self._ids = itertools.count(1)
         self.ws: dict[str, dict] = {}  # id -> {label}
