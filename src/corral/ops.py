@@ -1,6 +1,6 @@
 """The operations behind every command: build a workspace, open an
 agent tab, stop agents, close workspaces, reveal a folder in the file
-manager.
+manager, start herdr over with one workspace.
 
 Each takes a Herdr (real or fake), reports progress lines through `report`,
 and returns a result dataclass that the CLI prints or dumps as JSON.
@@ -94,6 +94,21 @@ class RevealResult:
     workspace: str = ""  # set when the target named, or defaulted to, a workspace
     command: list[str] = field(default_factory=list)
     action: str = ""  # opened | would-open | failed
+    error: str = ""
+
+
+FRESH_WORKSPACE = "Control Center"  # DEC-26: not "~", so it belongs to no project
+FRESH_TAB = "Corral"
+
+
+@dataclass
+class FreshResult:
+    action: str = ""  # reset | would-reset | cancelled | failed
+    started_server: bool = False
+    workspace: str = ""
+    tab: str = ""
+    running: list[str] = field(default_factory=list)
+    closed: list[CloseResult] = field(default_factory=list)
     error: str = ""
 
 
@@ -530,6 +545,77 @@ def close(
                 res.action, res.error = "failed", e.message
         out.append(res)
     return out
+
+
+def fresh(
+    h: Herdr,
+    *,
+    confirm: Callable[[list[str]], bool],
+    tui_command: str,
+    dry_run: bool = False,
+    report: Report = _quiet,
+) -> FreshResult:
+    """Start herdr over with one workspace (DEC-26 steps 1-5): refuse inside
+    herdr, start the server if it isn't running, read every workspace, ask
+    `confirm` with the working or blocked agents' names (only when there are
+    any), build Control Center with a Corral tab running `tui_command`, then
+    close every workspace read before it. A dry run changes nothing, starts
+    no server and asks nothing."""
+    if self_workspace() or os.environ.get("HERDR_ENV") == "1":
+        raise ConfigError("--fresh can't run inside herdr; run it from a plain terminal")
+    res = FreshResult(started_server=not h.available())
+    snap: Snapshot | None = None
+    if res.started_server and dry_run:
+        report("would start the herdr server")
+    else:
+        if res.started_server:
+            if not h.start_server():
+                raise HerdrError(
+                    "herdr_unavailable",
+                    "herdr is not on PATH, or its server didn't answer within 10 seconds",
+                )
+            report("started the herdr server")
+        snap = h.snapshot()
+        res.running = [
+            a.name or a.pane_id for a in snap.agents if a.status in ("working", "blocked")
+        ]
+        if res.running:
+            if dry_run:
+                report("would ask first: " + ", ".join(res.running) + " working or blocked")
+            elif not confirm(res.running):
+                res.action = "cancelled"
+                report("cancelled; nothing changed", error=True)
+                return res
+
+    home = str(Path.home())
+    if dry_run:
+        report(
+            f"would build '{FRESH_WORKSPACE}' in {home}, tab '{FRESH_TAB}' running {tui_command}"
+        )
+    else:
+        try:
+            ws, tab, pane = h.create_workspace(home, FRESH_WORKSPACE)
+            res.workspace, res.tab = ws, tab
+            h.rename_tab(tab, FRESH_TAB)
+            h.pane_run(pane, tui_command)
+            h.focus_workspace(ws)
+        except HerdrError as e:
+            # A partly built workspace is left as it is; nothing old is closed.
+            res.action, res.error = "failed", e.message
+            report(f"FAILED to build '{FRESH_WORKSPACE}': {e.message}", error=True)
+            return res
+        report(f"built {ws} '{FRESH_WORKSPACE}' -> {home}")
+
+    ids = [w.id for w in snap.workspaces] if snap else []
+    if ids:
+        res.closed = close(h, ids, dry_run=dry_run, report=report)
+    if dry_run:
+        res.action = "would-reset"
+    elif any(c.action != "closed" for c in res.closed):
+        res.action, res.error = "failed", "some workspaces didn't close"
+    else:
+        res.action = "reset"
+    return res
 
 
 def reveal(
