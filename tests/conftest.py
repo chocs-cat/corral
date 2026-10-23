@@ -94,6 +94,7 @@ def mac(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_self_ws(monkeypatch):
     monkeypatch.delenv("HERDR_WORKSPACE_ID", raising=False)
+    monkeypatch.delenv("HERDR_ENV", raising=False)
 
 
 @pytest.fixture(autouse=True)

@@ -7,12 +7,14 @@ parsing path that FakeHerdr skips."""
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from corral import ops
 from corral.herdr import Herdr, HerdrError
+from tests.fake_herdr import FakeHerdr
 
 STUB = f"""#!{sys.executable}
 import json, os, sys
@@ -27,6 +29,26 @@ with open(plan, "w") as f:
 sys.stdout.write(r.get("stdout", ""))
 sys.stderr.write(r.get("stderr", ""))
 sys.exit(r.get("exit", 0))
+"""
+
+
+SERVER_STUB = f"""#!{sys.executable}
+import json, os, sys, time
+d = os.environ["STUB_SERVER_DIR"]
+marker, info = os.path.join(d, "running"), os.path.join(d, "info.json")
+with open(os.path.join(d, "log"), "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1:2] == ["status"]:
+    sys.exit(0 if os.path.exists(marker) else 1)
+if sys.argv[1:2] == ["server"]:
+    null = os.stat(os.devnull)
+    fds = [(os.fstat(fd).st_dev, os.fstat(fd).st_ino) == (null.st_dev, null.st_ino)
+           for fd in (0, 1, 2)]
+    with open(info, "w") as f:
+        json.dump({{"sid": os.getsid(0), "devnull": fds}}, f)
+    if os.environ.get("STUB_SERVER_NEVER") != "1":
+        time.sleep(float(os.environ.get("STUB_SERVER_DELAY", "0")))
+        open(marker, "w").close()
 """
 
 
@@ -159,3 +181,81 @@ def test_agent_kinds_are_read_from_help(stub):
     stub({"stdout": "no kinds here"})
     assert "claude" in Herdr().agent_kinds()  # the built-in fallback
     assert "claude" in Herdr("/no/such/herdr").agent_kinds()
+
+
+@pytest.fixture
+def server_stub(tmp_path: Path, monkeypatch):
+    """A `herdr` whose `status` answers once a marker file exists and whose
+    `server` records how it was started, then creates the marker after
+    $STUB_SERVER_DELAY seconds (never, with STUB_SERVER_NEVER=1). Separate
+    from `stub`: a detached server would race the next `status` poll for
+    `stub`'s shared response queue."""
+    bin_dir = tmp_path / "server-bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "herdr"
+    exe.write_text(SERVER_STUB)
+    exe.chmod(0o755)
+    state = tmp_path / "server-state"
+    state.mkdir()
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("STUB_SERVER_DIR", str(state))
+
+    class ServerStub:
+        marker = state / "running"
+        info = state / "info.json"
+        log = state / "log"
+
+        def calls(self) -> list[list[str]]:
+            if not self.log.exists():
+                return []
+            return [json.loads(x) for x in self.log.read_text().splitlines()]
+
+    return ServerStub()
+
+
+def test_start_server_when_already_running_starts_nothing(server_stub):
+    server_stub.marker.touch()
+    assert Herdr().start_server() is True
+    assert server_stub.calls() == [["status"]]
+
+
+def test_start_server_starts_a_detached_server_and_polls(server_stub, monkeypatch):
+    monkeypatch.setenv("STUB_SERVER_DELAY", "0.3")
+    assert Herdr().start_server() is True
+    calls = server_stub.calls()
+    assert calls[0] == ["status"]
+    assert calls.count(["server"]) == 1
+    assert calls.count(["status"]) > 1  # it polled until the server answered
+    info = json.loads(server_stub.info.read_text())
+    assert info["sid"] != os.getsid(0)  # its own session
+    assert info["devnull"] == [True, True, True]  # no shared stdin, stdout or stderr
+
+
+def test_start_server_gives_up_after_timeout(server_stub, monkeypatch):
+    monkeypatch.setenv("STUB_SERVER_NEVER", "1")
+    t = time.monotonic()
+    assert Herdr().start_server(timeout=0.5) is False
+    assert time.monotonic() - t < 2
+    assert server_stub.calls().count(["server"]) == 1
+
+
+def test_start_server_without_herdr_on_path():
+    t = time.monotonic()
+    assert Herdr("/no/such/herdr").start_server() is False
+    assert time.monotonic() - t < 1
+
+
+def test_fake_start_server(herdr):
+    herdr.unavailable = True
+    assert herdr.start_server() is True
+    assert herdr.available()
+    assert herdr.calls == [("start_server",)]
+
+    running = FakeHerdr()
+    assert running.start_server() is True
+    assert running.calls == []
+
+    broken = FakeHerdr()
+    broken.unavailable = broken.server_fails = True
+    assert broken.start_server() is False
+    assert not broken.available()
