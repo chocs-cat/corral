@@ -9,7 +9,9 @@ import pytest
 
 from corral import ops
 from corral.config import ConfigError
+from corral.herdr import HerdrError
 from corral.ops import open_detached as real_open_detached  # before the autouse fixture
+from tests.fake_herdr import fail
 
 B = "•"
 
@@ -440,3 +442,250 @@ def test_reveal_folder_unsupported_platform(root, monkeypatch, opener):
     res = ops.reveal_folder(root / "courses")
     assert (res.action, res.error) == ("failed", "unsupported platform: win32")
     assert opener.calls == []
+
+
+# --- fresh (DEC-26) ------------------------------------------------------------
+
+TUI = "corral --root /r"
+
+
+class Confirm:
+    """Stands in for fresh's confirm: records each call, answers `answer`."""
+
+    def __init__(self, answer: bool = True) -> None:
+        self.answer = answer
+        self.calls: list[list[str]] = []
+
+    def __call__(self, running: list[str]) -> bool:
+        self.calls.append(list(running))
+        return self.answer
+
+
+def old_workspace(herdr, label: str, *agents: tuple[str, str]) -> str:
+    """A workspace with one tab per (agent name, status)."""
+    ws, _, _ = herdr.create_workspace("/old", label)
+    for name, status in agents:
+        _, pane = herdr.create_tab(ws, "/old", name)
+        herdr.agent_start(name, "claude", pane, 0, [])
+        herdr.agents[pane]["status"] = status
+    return ws
+
+
+def control_centers(herdr) -> list[str]:
+    return [i for i, w in herdr.ws.items() if w["label"] == ops.FRESH_WORKSPACE]
+
+
+class Untouchable:
+    def __getattr__(self, name):
+        pytest.fail(f"fresh touched herdr ({name}) before refusing")
+
+
+@pytest.mark.parametrize(("var", "value"), [("HERDR_WORKSPACE_ID", "w1"), ("HERDR_ENV", "1")])
+def test_fresh_refuses_inside_herdr_before_touching_it(monkeypatch, var, value):
+    monkeypatch.setenv(var, value)
+    with pytest.raises(ConfigError, match="inside herdr"):
+        ops.fresh(Untouchable(), confirm=Confirm(), tui_command=TUI)  # ty: ignore[invalid-argument-type]
+
+
+def test_fresh_herdr_env_other_than_1_does_not_refuse(herdr, monkeypatch):
+    monkeypatch.setenv("HERDR_ENV", "0")
+    assert ops.fresh(herdr, confirm=Confirm(), tui_command=TUI).action == "reset"
+
+
+def test_fresh_starts_the_server_when_it_is_not_running(herdr):
+    herdr.unavailable = True
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert res.started_server
+    assert ("start_server",) in herdr.calls
+    assert control_centers(herdr) == [res.workspace]
+    assert res.action == "reset"
+
+
+def test_fresh_leaves_a_running_server_alone(herdr):
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert not res.started_server
+    assert ("start_server",) not in herdr.calls
+
+
+def test_fresh_server_that_wont_start_is_herdr_unavailable(herdr):
+    herdr.unavailable = herdr.server_fails = True
+    with pytest.raises(HerdrError) as e:
+        ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert e.value.code == "herdr_unavailable"
+    assert herdr.ws == {}
+
+
+def test_fresh_dry_run_does_not_start_the_server(herdr):
+    herdr.unavailable = True
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI, dry_run=True)
+    assert res.started_server
+    assert ("start_server",) not in herdr.calls
+    assert not herdr.available()
+    assert res.closed == []
+    assert res.action == "would-reset"
+
+
+def test_fresh_does_not_ask_about_idle_done_or_exited_agents(herdr):
+    old_workspace(herdr, "a", ("a1", "idle"), ("a2", "done"), ("a3", "exited"))
+    confirm = Confirm(answer=False)
+    res = ops.fresh(herdr, confirm=confirm, tui_command=TUI)
+    assert confirm.calls == []
+    assert res.running == []
+    assert res.action == "reset"
+
+
+def test_fresh_asks_once_about_working_and_blocked_agents(herdr):
+    old_workspace(herdr, "a", ("a1", "idle"), ("a2", "blocked"))
+    old_workspace(herdr, "b", ("b1", "working"), ("b2", "done"))
+    confirm = Confirm()
+    res = ops.fresh(herdr, confirm=confirm, tui_command=TUI)
+    assert confirm.calls == [["a2", "b1"]]
+    assert res.running == ["a2", "b1"]
+    assert res.action == "reset"
+
+
+def test_fresh_declined_changes_nothing(herdr):
+    old = [old_workspace(herdr, "a", ("a1", "working")), old_workspace(herdr, "b")]
+    res = ops.fresh(herdr, confirm=Confirm(answer=False), tui_command=TUI)
+    assert res.action == "cancelled"
+    assert list(herdr.ws) == old
+    assert control_centers(herdr) == []
+    assert res.closed == []
+    assert res.workspace == res.tab == ""
+
+
+def test_fresh_dry_run_does_not_ask(herdr):
+    old_workspace(herdr, "a", ("a1", "working"))
+    confirm = Confirm()
+    res = ops.fresh(herdr, confirm=confirm, tui_command=TUI, dry_run=True)
+    assert confirm.calls == []
+    assert res.running == ["a1"]
+    assert res.action == "would-reset"
+
+
+def test_fresh_builds_control_center(herdr, home):
+    old_workspace(herdr, "a", ("a1", "idle"))
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert list(herdr.ws) == [res.workspace]
+    assert herdr.ws[res.workspace]["label"] == "Control Center"
+    tabs = [i for i, t in herdr.tabs.items() if t["ws"] == res.workspace]
+    assert tabs == [res.tab]
+    assert herdr.tabs[res.tab]["label"] == "Corral"
+    panes = [p for p in herdr.panes.values() if p["tab"] == res.tab]
+    assert [(p["cwd"], p["ran"]) for p in panes] == [(str(home), [TUI])]
+    assert res.workspace in herdr.focused
+
+
+def test_fresh_builds_before_it_closes(herdr, monkeypatch):
+    old_workspace(herdr, "a")
+    old_workspace(herdr, "b", ("b1", "idle"))
+    seen = []
+    real = herdr.close_workspace
+
+    def recording(ws):
+        seen.append(control_centers(herdr))
+        real(ws)
+
+    monkeypatch.setattr(herdr, "close_workspace", recording)
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert seen == [[res.workspace], [res.workspace]]
+    assert control_centers(herdr) == [res.workspace]
+
+
+def test_fresh_closes_every_old_workspace_an_earlier_control_center_too(herdr):
+    old = [
+        old_workspace(herdr, ops.FRESH_WORKSPACE),
+        old_workspace(herdr, "a", ("a1", "idle"), ("a2", "exited")),
+        old_workspace(herdr, "b", ("b1", "done")),
+    ]
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert res.workspace not in old
+    assert list(herdr.ws) == [res.workspace]
+    assert [(c.workspace, c.action) for c in res.closed] == [(w, "closed") for w in old]
+    assert res.closed[1].agents == ["a1", "a2"]
+    assert herdr.agents == {}
+    assert res.action == "reset"
+
+
+def test_fresh_reports_a_failed_close_and_closes_the_rest(herdr, monkeypatch):
+    _, b, _ = (old_workspace(herdr, x) for x in "abc")
+    real = herdr.close_workspace
+
+    def flaky(ws):
+        if ws == b:
+            raise fail("workspace_busy", "can't close b")
+        real(ws)
+
+    monkeypatch.setattr(herdr, "close_workspace", flaky)
+    lines = []
+    res = ops.fresh(
+        herdr, confirm=Confirm(), tui_command=TUI, report=lambda s, error=False: lines.append(s)
+    )
+    assert [x.action for x in res.closed] == ["closed", "failed", "closed"]
+    assert res.closed[1].error == "can't close b"
+    assert set(herdr.ws) == {b, res.workspace}
+    assert any("FAILED to close" in x and "can't close b" in x for x in lines)
+    assert (res.action, res.error) == ("failed", "some workspaces didn't close")
+
+
+@pytest.mark.parametrize("step", ["create_workspace", "rename_tab", "pane_run", "focus_workspace"])
+def test_fresh_failed_build_closes_nothing(herdr, monkeypatch, step):
+    old = [old_workspace(herdr, "a", ("a1", "idle")), old_workspace(herdr, "b")]
+
+    def broken(*args, **kwargs):
+        raise fail("boom", f"{step} failed")
+
+    monkeypatch.setattr(herdr, step, broken)
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert all(w in herdr.ws for w in old)
+    assert res.closed == []
+    assert (res.action, res.error) == ("failed", f"{step} failed")
+    if step != "create_workspace":  # the partly built workspace is left as it is
+        assert control_centers(herdr) == [res.workspace]
+        assert res.tab
+
+
+def test_fresh_dry_run_changes_nothing(herdr):
+    old = [old_workspace(herdr, "a", ("a1", "idle")), old_workspace(herdr, "b")]
+    before = (dict(herdr.ws), dict(herdr.tabs), dict(herdr.panes))
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI, dry_run=True)
+    assert (herdr.ws, herdr.tabs, herdr.panes) == before
+    assert res.workspace == res.tab == ""
+    assert [(c.workspace, c.action) for c in res.closed] == [(w, "would-close") for w in old]
+    assert res.action == "would-reset"
+
+
+def test_fresh_with_no_workspaces(herdr):
+    res = ops.fresh(herdr, confirm=Confirm(), tui_command=TUI)
+    assert control_centers(herdr) == [res.workspace]
+    assert res.closed == []
+    assert res.action == "reset"
+
+
+def test_fresh_reports(herdr, home, monkeypatch):
+    def run(h, confirm=None, dry_run=False):
+        lines = []
+        report = lambda s, error=False: lines.append((s, error))  # noqa: E731
+        ops.fresh(h, confirm=confirm or Confirm(), tui_command=TUI, dry_run=dry_run, report=report)
+        return lines
+
+    build = f"would build 'Control Center' in {home}, tab 'Corral' running {TUI}"
+    herdr.unavailable = True
+    assert run(herdr, dry_run=True) == [("would start the herdr server", False), (build, False)]
+
+    lines = run(herdr)
+    ws = control_centers(herdr)[0]
+    assert lines == [
+        ("started the herdr server", False),
+        (f"built {ws} 'Control Center' -> {home}", False),
+    ]
+
+    old_workspace(herdr, "a", ("a1", "working"))
+    assert run(herdr, dry_run=True)[0] == ("would ask first: a1 working or blocked", False)
+    assert run(herdr, confirm=Confirm(answer=False)) == [("cancelled; nothing changed", True)]
+
+    def broken(*args):
+        raise fail("x", "nope")
+
+    monkeypatch.setattr(herdr, "rename_tab", broken)
+    assert run(herdr) == [("FAILED to build 'Control Center': nope", True)]

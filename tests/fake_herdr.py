@@ -34,6 +34,7 @@ class FakeHerdr:
         self.fail_start: set[str] = set()  # agent kinds that fail to start
         self.calls: list[tuple] = []
         self.unavailable = False  # the server isn't reachable
+        self.server_fails = False  # start_server can't bring it up
 
     def _id(self, prefix: str) -> str:
         return f"{prefix}{next(self._ids)}"
@@ -42,6 +43,15 @@ class FakeHerdr:
 
     def available(self) -> bool:
         return not self.unavailable
+
+    def start_server(self, timeout: float = 10.0) -> bool:
+        if self.available():
+            return True
+        if self.server_fails:
+            return False
+        self.calls.append(("start_server",))
+        self.unavailable = False
+        return True
 
     def agent_kinds(self) -> list[str]:
         return ["claude", "codex", "gemini"]

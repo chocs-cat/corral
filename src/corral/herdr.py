@@ -12,6 +12,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 
 # Agent kinds herdr 0.8 can start, for when `herdr agent start --help` can't
@@ -127,6 +128,32 @@ class Herdr:
             )
         except (OSError, subprocess.TimeoutExpired):
             return False
+
+    def start_server(self, timeout: float = 10.0) -> bool:
+        """Start `herdr server` unless herdr already answers, then wait up to
+        `timeout` seconds for it to (DEC-26 step 2). Returns whether herdr
+        answers. A server this starts outlives corral: it runs in its own
+        session and shares none of corral's stdin, stdout or stderr."""
+        if not shutil.which(self.binary):
+            return False
+        if self.available():
+            return True
+        try:
+            subprocess.Popen(
+                [self.binary, "server"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            return False
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.available():
+                return True
+            time.sleep(0.1)
+        return False
 
     def agent_kinds(self) -> list[str]:
         """The agent kinds this herdr can start (`--kind` values)."""
