@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/chocs-cat/corral/compare/v0.10.0...v0.10.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **herdr:** corral --fresh starts a stopped herdr server ([#63](https://github.com/chocs-cat/corral/issues/63)) ([560eb35](https://github.com/chocs-cat/corral/commit/560eb35389c39cb49a3f7011dd185840ac19f038)), closes [#62](https://github.com/chocs-cat/corral/issues/62)
+
 ## [0.10.0](https://github.com/chocs-cat/corral/compare/v0.9.0...v0.10.0) (2026-10-23)
 
 
