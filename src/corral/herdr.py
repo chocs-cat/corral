@@ -109,6 +109,14 @@ def parse_response(returncode: int, stdout: str, stderr: str) -> dict:
     return out.get("result", {})
 
 
+def _server_running(stdout: str) -> bool:
+    """`herdr status --json` output -> whether it says the server is running.
+    The document is top-level, {"server": {"running": true, ...}, ...}, with
+    no "result" wrapper."""
+    server = _json_doc(stdout).get("server")
+    return isinstance(server, dict) and server.get("running") is True
+
+
 class Herdr:
     """Real herdr, via subprocess. Tests substitute a fake with the same
     methods (tests/fake_herdr.py)."""
@@ -119,21 +127,27 @@ class Herdr:
     # plumbing
 
     def available(self) -> bool:
+        """Whether a herdr server is running, by `herdr status --json`'s
+        `server.running`: `herdr status` exits 0 either way (#62)."""
         if not shutil.which(self.binary):
             return False
         try:
-            return (
-                subprocess.run([self.binary, "status"], capture_output=True, timeout=10).returncode
-                == 0
+            r = subprocess.run(
+                [self.binary, "status", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.TimeoutExpired):
             return False
+        return r.returncode == 0 and _server_running(r.stdout)
 
     def start_server(self, timeout: float = 10.0) -> bool:
-        """Start `herdr server` unless herdr already answers, then wait up to
-        `timeout` seconds for it to (DEC-26 step 2). Returns whether herdr
-        answers. A server this starts outlives corral: it runs in its own
-        session and shares none of corral's stdin, stdout or stderr."""
+        """Start `herdr server` unless one is already running, then wait up
+        to `timeout` seconds for it to be (DEC-26 step 2). Returns whether a
+        server is running. A server this starts outlives corral: it runs in
+        its own session and shares none of corral's stdin, stdout or stderr."""
         if not shutil.which(self.binary):
             return False
         if self.available():

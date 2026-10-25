@@ -6,6 +6,7 @@ parsing path that FakeHerdr skips."""
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -39,7 +40,10 @@ marker, info = os.path.join(d, "running"), os.path.join(d, "info.json")
 with open(os.path.join(d, "log"), "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 if sys.argv[1:2] == ["status"]:
-    sys.exit(0 if os.path.exists(marker) else 1)
+    running = os.path.exists(marker)
+    status = "running" if running else "not_running"
+    print(json.dumps({{"server": {{"status": status, "running": running}}}}))
+    sys.exit(0)
 if sys.argv[1:2] == ["server"]:
     null = os.stat(os.devnull)
     fds = [(os.fstat(fd).st_dev, os.fstat(fd).st_ino) == (null.st_dev, null.st_ino)
@@ -185,8 +189,9 @@ def test_agent_kinds_are_read_from_help(stub):
 
 @pytest.fixture
 def server_stub(tmp_path: Path, monkeypatch):
-    """A `herdr` whose `status` answers once a marker file exists and whose
-    `server` records how it was started, then creates the marker after
+    """A `herdr` whose `status`, like real herdr's, always exits 0 and reports
+    `server.running` true once a marker file exists, and whose `server`
+    records how it was started, then creates the marker after
     $STUB_SERVER_DELAY seconds (never, with STUB_SERVER_NEVER=1). Separate
     from `stub`: a detached server would race the next `status` poll for
     `stub`'s shared response queue."""
@@ -213,10 +218,43 @@ def server_stub(tmp_path: Path, monkeypatch):
     return ServerStub()
 
 
+def status(running, exit: int = 0) -> dict:
+    state = "running" if running else "not_running"
+    return {"exit": exit, "stdout": json.dumps({"server": {"status": state, "running": running}})}
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (status(False), False),  # herdr status exits 0 with no server (#62)
+        (status(True), True),
+        (status(True, exit=1), False),
+        ({"stdout": "status: running\n"}, False),
+        ({"stdout": "{}"}, False),
+        ({"stdout": json.dumps({"server": "running"})}, False),
+        ({"stdout": json.dumps({"server": {"status": "running"}})}, False),
+        ({"stdout": json.dumps({"server": {"running": "true"}})}, False),
+        ({"stdout": json.dumps(["server"])}, False),
+    ],
+)
+def test_available_reads_server_running(stub, response, expected):
+    stub(response)
+    assert Herdr().available() is expected
+    assert stub.calls() == [["status", "--json"]]
+
+
+def test_available_false_on_timeout(stub, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 10)
+
+    monkeypatch.setattr("corral.herdr.subprocess.run", timeout)
+    assert Herdr().available() is False
+
+
 def test_start_server_when_already_running_starts_nothing(server_stub):
     server_stub.marker.touch()
     assert Herdr().start_server() is True
-    assert server_stub.calls() == [["status"]]
+    assert server_stub.calls() == [["status", "--json"]]
 
 
 def test_start_server_starts_a_detached_server_and_polls(server_stub, monkeypatch):
@@ -233,9 +271,9 @@ def test_start_server_starts_a_detached_server_and_polls(server_stub, monkeypatc
         for fd in (r, w, saved):
             os.close(fd)
     calls = server_stub.calls()
-    assert calls[0] == ["status"]
+    assert calls[0] == ["status", "--json"]
     assert calls.count(["server"]) == 1
-    assert calls.count(["status"]) > 1  # it polled until the server answered
+    assert calls.count(["status", "--json"]) > 1  # it polled until the server answered
     info = json.loads(server_stub.info.read_text())
     assert info["sid"] != os.getsid(0)  # its own session
     assert info["devnull"] == [True, True, True]  # no shared stdin, stdout or stderr
