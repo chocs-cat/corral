@@ -147,13 +147,36 @@ def start_agent(
 
 # --- building blocks ----------------------------------------------------------
 
+GIT_TIMEOUT_S = 10
+
+
+def in_git_work_tree(path: str) -> bool:
+    """Whether git sees `path` as inside a work tree (a folder inside a repo
+    counts). No git on PATH counts as outside (DEC-27)."""
+    git = shutil.which("git")
+    if not git:
+        return False
+    try:
+        proc = subprocess.run(
+            [git, "-C", path, "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_S,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
 
 def build_utility_tab(
     h: Herdr, cfg: Config, tab: str, root_pane: str, cwd: str, label: str, report: Report
 ) -> str:
     """Label the tab and build the configured panes from its single one, in
     list order: each later pane splits an earlier one (DEC-27). Runs each
-    pane's command and returns the pane left with the focus."""
+    pane's command (a git-only pane's only inside a git work tree) and
+    returns the pane left with the focus."""
     u = cfg.utility
     focused = u.focused()
     h.rename_tab(tab, label)
@@ -171,10 +194,17 @@ def build_utility_tab(
             focus=pane.name == focused.name,
             ratio=(100 - pane.percent) / 100,
         )
+    in_git: bool | None = None  # asked once, and only if a git-only pane needs it
     for pane in u.panes:
         cmd = pane.command
         if not cmd:
             continue
+        if pane.git_only:
+            if in_git is None:
+                in_git = in_git_work_tree(cwd)
+            if not in_git:
+                report(f"  skip   {cmd} — not in a git work tree (plain shell instead)", error=True)
+                continue
         prog = tools.program(cmd)
         if not prog or not shutil.which(prog):
             hint = f"; corral tools install {prog}" if prog and tools.known(prog) else ""
