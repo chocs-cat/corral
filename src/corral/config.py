@@ -680,9 +680,7 @@ def to_data(cfg: Config) -> dict:
         "default_agents": list(cfg.default_agents),
         "refresh_seconds": float(cfg.refresh_seconds),
         "agent_timeout_ms": cfg.agent_timeout_ms,
-        "utility": {"enabled": u.enabled, **sh}
-        if (sh := u.as_shorthand()) is not None
-        else {"enabled": u.enabled, "panes": [_pane_data(p) for p in u.panes]},
+        "utility": {"enabled": u.enabled, "panes": [_pane_data(p) for p in u.panes]},
         "harnesses": {name: {"command": h.command} for name, h in sorted(cfg.harnesses.items())},
         "models": [_model_data(m) for m in cfg.custom_models],
         "hide_models": sorted(cfg.hide_models),
@@ -739,26 +737,70 @@ def _put_table(table, value: dict, default: dict) -> None:
             table[k] = v
 
 
-def _put_models(doc, models: list[dict]) -> None:
-    """Update [[models]]: in place while the keys and their order are
-    unchanged; otherwise rebuild it in the new order, reusing each surviving
-    table (and the comments in it), one blank line apart."""
-    old = doc.get("models")
+def _put_tables(parent, key: str, items: list[dict], id_key: str, default: dict) -> None:
+    """Update an array of tables ([[models]], [[utility.panes]]): in place
+    while the ids (`id_key`) and their order are unchanged; otherwise
+    rebuild it in the new order, reusing each surviving table (and the
+    comments in it), one blank line apart."""
+    old = parent.get(key)
     tables = list(old) if isinstance(old, list) else []
-    if [str(t.get("key")) for t in tables] == [m["key"] for m in models]:
-        for t, m in zip(tables, models, strict=True):
-            _put_table(t, m, {})
+    if [str(t.get(id_key)) for t in tables] == [m[id_key] for m in items]:
+        for t, m in zip(tables, items, strict=True):
+            _put_table(t, m, default)
         return
-    by_key = {str(t.get("key")): t for t in tables}
+    by_id = {str(t.get(id_key)): t for t in tables}
     aot = tomlkit.aot()
-    for m in models:
-        t = by_key.get(m["key"]) or tomlkit.table()
-        _put_table(t, m, {})
+    for m in items:
+        t = by_id.get(m[id_key]) or tomlkit.table()
+        _put_table(t, m, default)
         body = t.value.body
         while body and body[-1][0] is None and isinstance(body[-1][1], Whitespace):
             body.pop()  # the aot puts one blank line between tables itself
         aot.append(t)
-    doc["models"] = aot
+    parent[key] = aot
+
+
+PANE_DEFAULTS = {"focus": False, "git_only": False}
+
+
+def _put_utility(doc, u: Utility) -> None:
+    """Write [utility] in the file's form (DEC-27): the shorthand keys while
+    the file uses them (or has no [utility]) and the layout fits them;
+    otherwise [[utility.panes]], with the shorthand keys removed. Panes the
+    file already says, however it words them, are left alone."""
+    table = doc.get("utility")
+    has_table = isinstance(table, dict)
+    shorthand = u.as_shorthand()
+    if shorthand is not None and not (has_table and "panes" in table):
+        value = {"enabled": u.enabled, **shorthand}
+        default = {"enabled": True, **(Utility().as_shorthand() or {})}
+        if has_table:
+            _put_table(table, value, default)
+        else:
+            doc["utility"] = {k: v for k, v in value.items() if v != default[k]}
+        return
+    if not has_table:
+        table = doc["utility"] = tomlkit.table()
+    for k in SHORTHAND_KEYS:
+        if k in table:
+            del table[k]
+    written = "enabled" in table or not u.enabled
+    if written and _plain(table.get("enabled")) != u.enabled:
+        table["enabled"] = u.enabled
+    try:
+        same = _panes(_plain(table["panes"])) == u.panes if "panes" in table else False
+    except ConfigError:
+        same = False
+    if same:
+        return
+    # Blank lines and comments at the table's end lead into what follows it:
+    # keep them after the panes when the panes are new here.
+    body = table.value.body
+    trailing = []
+    while "panes" not in table and body and body[-1][0] is None:
+        trailing.insert(0, body.pop())
+    _put_tables(table, "panes", [_pane_data(p) for p in u.panes], "name", PANE_DEFAULTS)
+    table["panes"][-1].value.body.extend(trailing)
 
 
 def save(cfg: Config, path: Path) -> None:
@@ -787,7 +829,9 @@ def save(cfg: Config, path: Path) -> None:
             continue
         if key == "models":
             if [_plain(t) for t in doc.get("models", [])] != value:
-                _put_models(doc, value)
+                _put_tables(doc, "models", value, "key", {})
+        elif key == "utility":
+            _put_utility(doc, cfg.utility)
         elif isinstance(value, dict) and isinstance(doc.get(key), dict):
             _put_table(doc[key], value, defaults.get(key, {}))
         elif isinstance(value, dict):
@@ -833,19 +877,42 @@ default_agents = ["sonnet/medium"]
 refresh_seconds = 3.0
 agent_timeout_ms = 60000
 
-# The utility tab: a pane on top, two below. Each value is a command, or ""
-# for a plain shell. A command that isn't installed falls back to a shell;
-# `corral tools` shows what's missing and `corral tools install` installs
-# yazi (a terminal file manager) and lazygit (a terminal UI for git).
-# top_percent is the top pane's share of the tab's height, and
-# bottom_left_percent the bottom-left pane's share of the bottom row (10-90).
+# The utility tab, the first tab of every workspace: its panes, in the order
+# they are built. The first pane is the tab's own; each later one splits an
+# earlier pane (`split`, by name) "right" or "down", and `percent` (10-90) is
+# its share of the pane it splits. `command` is what a pane runs: "" or none
+# is a plain shell, and so is a program that isn't installed; `corral tools`
+# shows what's missing and `corral tools install` installs yazi (a terminal
+# file manager) and lazygit (a terminal UI for git). A `git_only` pane is a
+# plain shell when the project isn't in a git repo. `focus = true` (on one
+# pane at most) picks the pane that starts focused; without it, the first
+# plain shell does, else the first pane.
+#
+# The older keys top, bottom_left, bottom_right, top_percent and
+# bottom_left_percent still work instead of panes (not together with them):
+# they describe this layout, a pane on top and two below.
 [utility]
 enabled = true
-top = "yazi"
-bottom_left = ""
-bottom_right = "lazygit"
-top_percent = 50
-bottom_left_percent = 35
+
+[[utility.panes]]
+name = "top"
+command = "yazi"
+
+[[utility.panes]]
+name = "bottom_left"
+command = ""
+split = "top"
+direction = "down"
+percent = 50
+focus = true
+
+[[utility.panes]]
+name = "bottom_right"
+command = "lazygit"
+split = "bottom_left"
+direction = "right"
+percent = 65
+git_only = true
 
 # Upgrading the agent CLIs: `corral harnesses upgrade`, or the settings
 # screen's Harnesses tab. corral upgrades Claude Code and Codex the way each
