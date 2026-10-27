@@ -67,7 +67,8 @@ The default utility tab runs two programs corral doesn't bundle:
 open and rename the project's files), and
 [lazygit](https://github.com/jesseduffield/lazygit), a terminal UI for git
 (stage, commit, branch, rebase and push with single keys). A pane whose
-program isn't installed opens a plain shell. corral can install them for you,
+program isn't installed opens a plain shell, and so does lazygit's pane when
+the project isn't in a git repo. corral can install them for you,
 with Homebrew, pacman, or `go install` for lazygit:
 
 ```sh
@@ -169,7 +170,7 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 
 Press `,` in the TUI for the settings screen. Its tabs cover the project root
 (with a folder browser), the agent tabs a new workspace gets, the utility tab's
-three panes and their sizes, the model matrix and effort levels, the
+commands and sizes, the model matrix and effort levels, the
 commands that upgrade Claude Code and Codex, and a few advanced options.
 Saving writes the config file and keeps its comments and layout. If the root
 doesn't exist when the TUI starts, the settings screen opens so you can
@@ -191,12 +192,25 @@ scan_depth = 3
 nested_folders = false              # also list plain nested folders
 default_agents = ["sonnet/medium"]
 
-[utility]                           # "" = plain shell
-top = "yazi"
-bottom_left = ""
-bottom_right = "lazygit"
-top_percent = 50                    # the top pane's share of the height
-bottom_left_percent = 35            # the bottom-left pane's share of the bottom row
+[[utility.panes]]                   # the utility tab, built in this order
+name = "top"
+command = "yazi"                    # "" or none = plain shell
+
+[[utility.panes]]
+name = "bottom_left"
+command = ""
+split = "top"                       # splits an earlier pane...
+direction = "down"                  # ...right or down,
+percent = 50                        # taking this share of it
+focus = true                        # starts focused
+
+[[utility.panes]]
+name = "bottom_right"
+command = "lazygit"
+split = "bottom_left"
+direction = "right"
+percent = 65
+git_only = true                     # a plain shell outside a git repo
 
 hide_models = ["5.6-sol"]           # built-in models you don't want offered
 
@@ -207,6 +221,30 @@ display = "Gemini"
 args = ["--model", "gemini-3-pro"]
 efforts = ["low", "high"]           # the levels offered, lowest first
 ```
+
+### The utility tab's layout
+
+`[[utility.panes]]` lists the utility tab's panes in the order they're built,
+so any layout of right and down splits works. The first pane is the tab's
+own; every other one names the earlier pane it `split`s, a `direction`
+(`right` or `down`) and a `percent` (10 to 90), its share of the pane it
+splits. Names must be unique. `focus = true` on one pane picks the pane that
+starts focused; without it, the first plain shell does, else the first pane.
+A `git_only` pane opens a plain shell when the project isn't in a git repo.
+`enabled = false` under `[utility]` drops the tab.
+
+The older keys, `top`, `bottom_left`, `bottom_right`, `top_percent` and
+`bottom_left_percent` under `[utility]`, still work: they describe the
+default shape, a pane on top and two below, with the top pane's share of the
+height and the bottom-left pane's share of the bottom row, and a lazygit pane
+there is git-only. Use them or `panes`, not both. A layout corral can't build
+(an empty list, a repeated name, a `split` naming no earlier pane, another
+direction, a size out of range, a second `focus`) is a config error, and
+corral exits with status 2.
+
+The settings screen edits the commands and sizes of the default shape. Any
+other layout is edited in the file for now, and saving from the settings
+screen leaves it as it is.
 
 ### Models
 

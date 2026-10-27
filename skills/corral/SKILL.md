@@ -13,7 +13,7 @@ A corral workspace has one shape:
 
 | Tab | Label | Contents |
 |---|---|---|
-| utility | the project label (`courses`, `shop/api`) | configurable panes; by default yazi (file manager) on top, a shell bottom-left (35%), lazygit (git UI) bottom-right (65%) |
+| utility | the project label (`courses`, `shop/api`) | configurable panes; by default yazi (file manager) on top, a shell bottom-left (35%), lazygit (git UI) bottom-right (65%), which gives way to a shell outside a git repo |
 | agent tabs | `<Model>•<effort>` (`Sonnet•medium`, `Opus•high`) | one interactive agent each |
 
 A second tab of the same model and effort is `Sonnet•medium-2`, then `-3`.
@@ -148,11 +148,23 @@ also lists the plain folders there. People can also change every setting from
 the TUI's settings screen (press `,`), so point a user there rather than
 hand-editing the file for them unless they ask.
 
-The `[utility]` table sets each pane's command (`top`, `bottom_left`,
-`bottom_right`; `""` is a plain shell) and the split sizes in percent
-(`top_percent`, `bottom_left_percent`, 10 to 90). A pane whose program isn't
-installed gets a plain shell, and `corral up` reports it. `corral tools --json`
-says whether yazi and lazygit are installed and how corral would install them;
+`[[utility.panes]]` lists the utility tab's panes in the order they're
+built: each has a `name` and a `command` (`""` is a plain shell), and every
+pane after the first `split`s an earlier one by name, `right` or `down`,
+taking `percent` (10 to 90) of it. `focus = true` marks the pane that starts
+focused (else the first plain shell, else the first pane), and a
+`git_only = true` pane opens a plain shell when the project isn't in a git
+work tree. The older `[utility]` keys (`top`, `bottom_left`, `bottom_right`,
+`top_percent`, `bottom_left_percent`) are a shorthand for the default shape,
+a pane on top and two below, with its lazygit pane git-only; a file uses them
+or `panes`, not both, and a bad layout exits 2. `corral config show` prints
+`utility` as `{"enabled": …, "panes": [{"name", "command", "split",
+"direction", "percent", "focus", "git_only"}, …]}`, the shorthand expanded
+and `split`, `direction` and `percent` null on the first pane. A pane whose
+program isn't installed, or a git-only pane outside a repo, gets a plain
+shell, and `corral up` reports it. `corral tools --json` says which `panes`
+(by name) run each program, whether yazi and lazygit are installed and how
+corral would install them;
 `corral tools install [yazi|lazygit]` installs them with Homebrew, pacman or
 go. It installs software on the user's machine (pacman runs under sudo), so
 ask before running it.
