@@ -403,3 +403,48 @@ Switching shape keeps the commands by position; new panes start as plain
 shells at 50%. A layout from the file that matches no preset's splits shows
 as *Custom*: its commands, sizes and switches stay editable, and its shape
 is changed in the file. Nothing is written until Save. (#21, #42)
+
+## DEC-28: The settings screen's layout presets and shape switching (2026-10)
+
+DEC-27 names the Utility tab's presets and their panes; these are the splits
+they build, in list order, each later pane at 50% unless edited:
+
+| Preset | Panes (split, direction) |
+|---|---|
+| One pane | `main` |
+| Side by side | `left`; `right` (`left`, right) |
+| Stacked | `top`; `bottom` (`top`, down) |
+| Top and two below | `top`; `bottom_left` (`top`, down, focused); `bottom_right` (`bottom_left`, right) |
+| Left and two on the right | `left`; `top_right` (`left`, right); `bottom_right` (`top_right`, down) |
+| Grid of four | `top_left`; `bottom_left` (`top_left`, down); `top_right` (`top_left`, right); `bottom_right` (`bottom_left`, right) |
+
+Top and two below is the shorthand's shape, with its focus, so a shorthand
+file still matches it.
+
+**Matching.** A layout is a preset when it has the preset's pane names in
+order and each later pane splits the same pane in the same direction.
+Commands, sizes, `focus` and `git_only` don't count. Anything else, a
+renamed pane included, is *Custom*, offered only when the file's layout is
+one.
+
+**Switching.** Choosing a shape, a preset or *Custom* again, takes the
+shape's names, splits and directions, and for each position the current
+pane's command, size and *git only* switch; positions past the current
+pane count take the shape's own (a preset's: a plain shell at 50%, not git
+only; Custom's: the file's). Focus comes from the shape: only Top and two
+below sets one, and Custom keeps the file's. While the shape isn't switched,
+every pane keeps the `focus` it was loaded with.
+
+**The diagram** draws each pane as a box to scale, labelled with its name
+and program (or *shell*). A layout too finely split to draw at that size is
+listed as `name: command` lines instead.
+
+## DEC-29: Saving rewrites an inline table it has to restructure (2026-10)
+
+When a save has to change a table's structure (add `[[utility.panes]]` under
+an inline `utility = { … }`, or reorder, add or remove the entries of an
+inline `panes = [{ … }]` or `models = [{ … }]`), it writes that part as
+standard tables (`[utility]`, `[[utility.panes]]`, `[[models]]`), a blank
+line before each header, and the file reloads to the settings saved. An
+inline table stays inline when only its values change, as DEC-6 keeps the
+file's layout. Inline tables hold no comments, so none are lost. (#68)
