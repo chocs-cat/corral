@@ -30,7 +30,7 @@ import shlex
 import shutil
 import subprocess
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import tomlkit
@@ -377,6 +377,77 @@ class Utility:
             or next((p for p in self.panes if not p.command), None)
             or self.panes[0]
         )
+
+
+@dataclass(frozen=True)
+class Preset:
+    """A utility-tab shape the settings screen offers (DEC-28)."""
+
+    key: str
+    title: str
+    panes: tuple[Pane, ...]
+
+
+PRESETS = (
+    Preset("one", "One pane", (Pane("main"),)),
+    Preset("side", "Side by side", (Pane("left"), Pane("right", "", "left", "right", 50))),
+    Preset("stacked", "Stacked", (Pane("top"), Pane("bottom", "", "top", "down", 50))),
+    Preset(
+        "top_two",
+        "Top and two below",
+        (
+            Pane("top"),
+            Pane("bottom_left", "", "top", "down", 50, focus=True),
+            Pane("bottom_right", "", "bottom_left", "right", 50),
+        ),
+    ),
+    Preset(
+        "left_two",
+        "Left and two on the right",
+        (
+            Pane("left"),
+            Pane("top_right", "", "left", "right", 50),
+            Pane("bottom_right", "", "top_right", "down", 50),
+        ),
+    ),
+    Preset(
+        "grid",
+        "Grid of four",
+        (
+            Pane("top_left"),
+            Pane("bottom_left", "", "top_left", "down", 50),
+            Pane("top_right", "", "top_left", "right", 50),
+            Pane("bottom_right", "", "bottom_left", "right", 50),
+        ),
+    ),
+)
+
+
+def preset_of(panes: tuple[Pane, ...]) -> Preset | None:
+    """The preset whose shape this is (DEC-28): the same names in order,
+    each splitting the same pane the same way. Commands, sizes, focus and
+    git_only don't count."""
+
+    def shape(ps):
+        return [(p.name, p.split, p.direction) for p in ps]
+
+    return next((pr for pr in PRESETS if shape(pr.panes) == shape(panes)), None)
+
+
+def reshape(current: tuple[Pane, ...], target: tuple[Pane, ...]) -> tuple[Pane, ...]:
+    """`target`'s shape (names, splits, directions, focus) with each
+    position's command, git_only and size taken from `current` (DEC-28).
+    Positions past `current` keep `target`'s own; the first pane has no
+    size."""
+    out = []
+    for i, t in enumerate(target):
+        if i < len(current):
+            c = current[i]
+            t = replace(t, command=c.command, git_only=c.git_only)
+            if i > 0 and c.percent is not None:
+                t = replace(t, percent=c.percent)
+        out.append(t)
+    return tuple(out)
 
 
 @dataclass

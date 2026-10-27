@@ -456,3 +456,66 @@ def test_as_shorthand():
         (top,),
     ):
         assert config.Utility(panes=panes).as_shorthand() is None
+
+
+# --- the settings screen's presets (DEC-28) ----------------------------------
+
+PRESET = {p.key: p for p in config.PRESETS}
+
+
+def test_presets_in_order_with_their_titles():
+    assert [(p.key, p.title) for p in config.PRESETS] == [
+        ("one", "One pane"),
+        ("side", "Side by side"),
+        ("stacked", "Stacked"),
+        ("top_two", "Top and two below"),
+        ("left_two", "Left and two on the right"),
+        ("grid", "Grid of four"),
+    ]
+    for p in config.PRESETS:
+        assert all(not q.command and not q.git_only for q in p.panes)
+        assert [q.percent for q in p.panes[1:]] == [50] * (len(p.panes) - 1)
+    assert [(p.key, q.name) for p in config.PRESETS for q in p.panes if q.focus] == [
+        ("top_two", "bottom_left")
+    ]
+
+
+@pytest.mark.parametrize("preset", config.PRESETS, ids=lambda p: p.key)
+def test_every_preset_parses_back_and_matches_itself(preset):
+    cfg = config.Config(utility=config.Utility(panes=preset.panes))
+    assert config.from_dict(config.to_data(cfg)).utility.panes == preset.panes
+    assert config.preset_of(preset.panes) is preset
+
+
+def test_preset_of_matches_the_shape_only():
+    assert config.preset_of(config.Utility().panes) is PRESET["top_two"]
+    grid = PRESET["grid"].panes
+    edited = (
+        replace(grid[0], command="yazi", git_only=True),
+        replace(grid[1], percent=20, focus=True),
+        *grid[2:],
+    )
+    assert config.preset_of(edited) is PRESET["grid"]
+    renamed = (replace(grid[0], name="tl"), *grid[1:])
+    assert config.preset_of(renamed) is None
+    assert config.preset_of((*grid[:3], replace(grid[3], split="top_right"))) is None
+    assert config.preset_of((*grid[:3], replace(grid[3], direction="down"))) is None
+    extra = config.Pane("more", "", "top_right", "down", 50)
+    assert config.preset_of((*grid, extra)) is None
+
+
+def test_reshape_keeps_commands_sizes_and_switches_by_position():
+    got = config.reshape(config.Utility().panes, PRESET["grid"].panes)
+    assert got == (
+        config.Pane("top_left", "yazi"),
+        config.Pane("bottom_left", "", "top_left", "down", 50),
+        config.Pane("top_right", "lazygit", "top_left", "right", 65, git_only=True),
+        config.Pane("bottom_right", "", "bottom_left", "right", 50),
+    )
+    assert not any(p.focus for p in got)
+
+    one = config.reshape(got, PRESET["one"].panes)
+    assert one == (config.Pane("main", "yazi"),)
+
+    back = config.reshape(PRESET["side"].panes, PRESET["top_two"].panes)
+    assert [p.name for p in back if p.focus] == ["bottom_left"]

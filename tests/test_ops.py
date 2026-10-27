@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from corral import ops
-from corral.config import ConfigError, Pane, Utility
+from corral.config import PRESETS, ConfigError, Pane, Utility
 from corral.herdr import HerdrError
 from corral.ops import open_detached as real_open_detached  # before the autouse fixture
 from tests.fake_herdr import fail
@@ -74,16 +74,37 @@ def test_utility_grid_splits_in_list_order(herdr, cfg, root):
         Pane("top_left", "true"),
         Pane("bottom_left", "", "top_left", "down", 40),
         Pane("top_right", "true", "top_left", "right", 70),
-        Pane("bottom_right", "true", "top_right", "down", 50),
+        Pane("bottom_right", "true", "bottom_left", "right", 50),
     )
     splits, focused, ids, got = built_utility(herdr, cfg, root, *grid)
     assert splits == [
         (ids["top_left"], "down", 0.6),
         (ids["top_left"], "right", 0.3),
-        (ids["top_right"], "down", 0.5),
+        (ids["bottom_left"], "right", 0.5),
     ]
     assert focused == [ids["bottom_left"]] == [got]  # the first plain shell
     assert [herdr.panes[ids[n]]["ran"] for n in ids] == [["true"], [], ["true"], ["true"]]
+
+
+# Each preset's splits (DEC-28), written out: (pane split, direction, ratio).
+PRESET_SPLITS = {
+    "one": [],
+    "side": [("left", "right", 0.5)],
+    "stacked": [("top", "down", 0.5)],
+    "top_two": [("top", "down", 0.5), ("bottom_left", "right", 0.5)],
+    "left_two": [("left", "right", 0.5), ("top_right", "down", 0.5)],
+    "grid": [
+        ("top_left", "down", 0.5),
+        ("top_left", "right", 0.5),
+        ("bottom_left", "right", 0.5),
+    ],
+}
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p.key)
+def test_each_preset_builds_its_splits(herdr, cfg, root, preset):
+    splits, _, ids, _ = built_utility(herdr, cfg, root, *preset.panes)
+    assert splits == [(ids[n], d, r) for n, d, r in PRESET_SPLITS[preset.key]]
 
 
 def test_one_pane_utility_tab_makes_no_split(herdr, cfg, root):
