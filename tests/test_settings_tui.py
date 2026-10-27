@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import tomlkit
 from textual.widgets import (
     Button,
     DataTable,
@@ -19,7 +20,13 @@ from textual.widgets import (
 from corral import config, harnesses, ops, tools
 from corral.config import PRESETS, Utility, reshape
 from corral.tui.app import AgentPicker, Confirm, CorralApp
-from corral.tui.settings import FolderPicker, ModelEditor, SettingsScreen, command_status
+from corral.tui.settings import (
+    FolderPicker,
+    ModelEditor,
+    SettingsScreen,
+    command_status,
+    layout_diagram,
+)
 from corral.tui.upgrades import UpgradeScreen
 
 B = "•"
@@ -669,3 +676,104 @@ async def test_upgrades_screen(app, harness_calls):
         await pilot.press("escape")
         await pilot.pause(0.1)
         assert not isinstance(app.screen, UpgradeScreen)
+
+
+GRID_50 = """\
+┌─────────────────────┬──────────────────────┐
+│                     │                      │
+│       top_left      │      top_right       │
+│        shell        │        shell         │
+│                     │                      │
+│                     │                      │
+├─────────────────────┼──────────────────────┤
+│                     │                      │
+│     bottom_left     │     bottom_right     │
+│        shell        │        shell         │
+│                     │                      │
+└─────────────────────┴──────────────────────┘"""
+
+DEFAULT_LAYOUT = """\
+┌────────────────────────────────────────────┐
+│                                            │
+│                    top                     │
+│                    yazi                    │
+│                                            │
+│                                            │
+├───────────────┬────────────────────────────┤
+│               │                            │
+│  bottom_left  │        bottom_right        │
+│     shell     │          lazygit           │
+│               │                            │
+└───────────────┴────────────────────────────┘"""
+
+
+def test_layout_diagram_draws_to_scale():
+    assert layout_diagram(PRESETS[-1].panes) == GRID_50
+    assert layout_diagram(Utility().panes) == DEFAULT_LAYOUT
+
+
+def test_layout_diagram_of_one_pane():
+    drawn = (layout_diagram((config.Pane("main", "htop -d 5"),)) or "").splitlines()
+    assert drawn[0] == "┌" + "─" * 44 + "┐"
+    assert drawn[-1] == "└" + "─" * 44 + "┘"
+    assert len(drawn) == 12
+    assert all(line.startswith("│") and line.endswith("│") for line in drawn[1:-1])
+    assert [line.strip("│ ") for line in drawn[1:-1] if line.strip("│ ")] == ["main", "htop"]
+
+
+def test_layout_diagram_with_one_row_shows_only_the_name():
+    panes = (config.Pane("a"), config.Pane("b", "htop", "a", "down", 70))
+    drawn = layout_diagram(panes, w=10, h=4) or ""
+    assert (
+        drawn
+        == "┌──────────┐\n│    a     │\n├──────────┤\n│    b     │\n│   htop   │\n└──────────┘"
+    )
+
+
+TOO_FINE = (
+    config.Pane("p0"),
+    *(config.Pane(f"p{i}", "", f"p{i - 1}", "down", 10) for i in range(1, 6)),
+)
+
+
+def test_a_layout_too_fine_to_draw_is_none():
+    assert layout_diagram(TOO_FINE) is None
+
+
+def custom_file(root, panes) -> str:
+    cfg = config.Config(root=root, utility=Utility(panes=panes))
+    return tomlkit.dumps({"root": str(root), "utility": config.to_data(cfg)["utility"]})
+
+
+async def test_the_screen_draws_the_layout(herdr, cfg_path, root, monkeypatch):
+    app = settings_app(herdr, cfg_path, f'root = "{root}"\n', monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        assert str(s.query_one("#util-diagram").render()) == DEFAULT_LAYOUT
+        await pick(pilot, s, "grid")
+        want = layout_diagram(reshape(Utility().panes, PRESETS[-1].panes))
+        assert str(s.query_one("#util-diagram").render()) == want
+        s.query_one("#util-pct-1", Input).value = "30"
+        await pilot.pause(0.1)
+        assert str(s.query_one("#util-diagram").render()) == layout_diagram(s.read_panes())
+
+
+async def test_the_screen_shows_names_literally_and_lists_what_it_cant_draw(
+    herdr, cfg_path, root, monkeypatch
+):
+    panes = (config.Pane("[x]", "yazi"), config.Pane("[/y]", "", "[x]", "right", 50))
+    app = settings_app(herdr, cfg_path, custom_file(root, panes), monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        drawn = str(s.query_one("#util-diagram").render())
+        assert "[x]" in drawn
+        assert "[/y]" in drawn
+
+    app = settings_app(herdr, cfg_path, custom_file(root, TOO_FINE), monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        listed = str(s.query_one("#util-diagram").render())
+        assert listed == "\n".join(f"p{i}: shell" for i in range(6))

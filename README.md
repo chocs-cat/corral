@@ -170,7 +170,7 @@ workspace is labelled `~` (quote it on the command line: `corral close '~'`).
 
 Press `,` in the TUI for the settings screen. Its tabs cover the project root
 (with a folder browser), the agent tabs a new workspace gets, the utility tab's
-commands and sizes, the model matrix and effort levels, the
+layout, commands and sizes, the model matrix and effort levels, the
 commands that upgrade Claude Code and Codex, and a few advanced options.
 Saving writes the config file and keeps its comments and layout. If the root
 doesn't exist when the TUI starts, the settings screen opens so you can
@@ -242,9 +242,14 @@ there is git-only. Use them or `panes`, not both. A layout corral can't build
 direction, a size out of range, a second `focus`) is a config error, and
 corral exits with status 2.
 
-The settings screen edits the commands and sizes of the default shape. Any
-other layout is edited in the file for now, and saving from the settings
-screen leaves it as it is.
+The settings screen's Utility tab offers six layouts: one pane, side by
+side, stacked, top and two below (the default), left and two on the right,
+and a grid of four. Each pane gets a command, a size and a *git only* switch,
+and a diagram draws the layout to scale. Switching layouts keeps the
+commands, sizes and switches by position. A layout from the file that is none
+of the six shows as *Custom*: its commands, sizes and switches are editable
+there, and its shape is changed in the file. Saving keeps the older keys
+while the layout fits them; otherwise it writes `[[utility.panes]]`.
 
 ### Models
 

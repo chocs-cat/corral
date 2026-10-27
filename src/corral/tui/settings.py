@@ -111,30 +111,59 @@ def command_status(cmd: str) -> Text:
     )
 
 
-def utility_diagram(
-    names: tuple[str, str, str], top_percent: int, left_percent: int, w: int = 44, h: int = 6
-) -> str:
-    """The utility tab's panes, drawn roughly to scale."""
-    top, left, right = names
-    th = min(h - 1, max(1, round(h * top_percent / 100)))
-    lw = min(w - 2, max(1, round((w - 1) * left_percent / 100)))
-    rw = w - 1 - lw
-    top_text = f"{top} {top_percent}%"
-    left_text = f"{left} {left_percent}%"
-    right_text = f"{right} {100 - left_percent}%"
+# A border cell's character from the sides it joins: up, down, left, right.
+BOX = {
+    frozenset("lr"): "─",
+    frozenset("ud"): "│",
+    frozenset("dr"): "┌",
+    frozenset("dl"): "┐",
+    frozenset("ur"): "└",
+    frozenset("ul"): "┘",
+    frozenset("udr"): "├",
+    frozenset("udl"): "┤",
+    frozenset("dlr"): "┬",
+    frozenset("ulr"): "┴",
+    frozenset("udlr"): "┼",
+}
 
-    def cell(text: str, width: int, show: bool) -> str:
-        return (text[:width] if show else "").center(width)
 
-    lines: list[str] = ["┌" + "─" * w + "┐"]
-    lines += [f"│{cell(top_text, w, i == (th - 1) // 2)}│" for i in range(th)]
-    lines.append("├" + "─" * lw + "┬" + "─" * rw + "┤")
-    bh = h - th
-    for i in range(bh):
-        mid = i == (bh - 1) // 2
-        lines.append(f"│{cell(left_text, lw, mid)}│{cell(right_text, rw, mid)}│")
-    lines.append("└" + "─" * lw + "┴" + "─" * rw + "┘")
-    return "\n".join(lines)
+def layout_diagram(panes: tuple[Pane, ...], w: int = 44, h: int = 10) -> str | None:
+    """The utility tab's panes drawn to scale, each labelled with its name
+    and program (DEC-28 "The diagram"); None when a pane would have no
+    room inside its border at this size."""
+    rects = {panes[0].name: (0, 0, w + 1, h + 1)}  # border columns and rows, inclusive
+    for p in panes[1:]:
+        x0, y0, x1, y1 = rects[p.split or ""]
+        keep = (100 - (p.percent or 50)) / 100  # the split pane's share
+        if p.direction == "right":
+            c = x0 + round((x1 - x0) * keep)
+            if c - x0 < 2 or x1 - c < 2:
+                return None
+            rects[p.split or ""], rects[p.name] = (x0, y0, c, y1), (c, y0, x1, y1)
+        else:
+            r = y0 + round((y1 - y0) * keep)
+            if r - y0 < 2 or y1 - r < 2:
+                return None
+            rects[p.split or ""], rects[p.name] = (x0, y0, x1, r), (x0, r, x1, y1)
+    joins = [[set() for _ in range(w + 2)] for _ in range(h + 2)]
+    for x0, y0, x1, y1 in rects.values():
+        for x in range(x0, x1):
+            for y in (y0, y1):
+                joins[y][x].add("r")
+                joins[y][x + 1].add("l")
+        for y in range(y0, y1):
+            for x in (x0, x1):
+                joins[y][x].add("d")
+                joins[y + 1][x].add("u")
+    grid = [[BOX.get(frozenset(j), " ") for j in row] for row in joins]
+    for p in panes:
+        x0, y0, x1, y1 = rects[p.name]
+        width, height = x1 - x0 - 1, y1 - y0 - 1
+        label = [p.name, tools.program(p.command) or "shell"][: 1 if height == 1 else 2]
+        top = y0 + 1 + (height - len(label)) // 2
+        for k, text in enumerate(label):
+            grid[top + k][x0 + 1 : x1] = text[:width].center(width)
+    return "\n".join("".join(row) for row in grid)
 
 
 def tool_status(name: str) -> Text:
@@ -893,7 +922,9 @@ class SettingsScreen(Screen[Config | None]):
             return
         # Names and commands come from the file: Text, not markup.
         panes = self.read_panes()
-        diagram.update(Text("\n".join(f"{p.name}: {p.command or 'shell'}" for p in panes)))
+        drawn = layout_diagram(panes)
+        listed = "\n".join(f"{p.name}: {p.command or 'shell'}" for p in panes)
+        diagram.update(Text(drawn or listed))
 
     def update_tools(self) -> None:
         for tool in tools.TOOLS:
