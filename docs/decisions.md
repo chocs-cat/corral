@@ -339,3 +339,67 @@ error}`: `action` is `reset`, `would-reset`, `cancelled` or `failed`;
 `workspace` and `tab` are the new ids (`""` in a dry run); `running` names
 the working or blocked agents; `closed` holds a `close` result per
 workspace. There is no TUI key for it, and agents don't run it. (#56)
+
+## DEC-27: The utility tab is a list of panes; a pane can be git-only (2026-10)
+
+The utility tab used to be one fixed shape, a pane on top and two below.
+Now `[utility]` describes it as an ordered list of panes, `[[utility.panes]]`,
+built the way herdr builds panes: the first pane is the tab's own, and each
+later one splits an earlier pane `right` or `down` (the only directions herdr
+has), so any layout made of such splits works.
+
+Each pane has:
+
+- `name`: required, non-empty and unique in the tab. It is how other panes
+  refer to it and what `corral tools --json` lists under `panes`.
+- `command`: what it runs; `""` or absent is a plain shell. A program that
+  isn't installed still falls back to a shell (DEC-20).
+- `split`, `direction`, `percent`: absent on the first pane, required on
+  every other. `split` names an earlier pane, `direction` is `right` or
+  `down`, and `percent` (a whole number, 10 to 90) is the new pane's share
+  of the pane it splits. herdr's `--ratio` is the share the split pane
+  keeps, so corral passes `1 - percent/100`.
+- `focus`: at most one pane sets it. Without one, the first pane whose
+  `command` is empty gets the focus, else the first pane.
+- `git_only`: outside a git work tree (as `git rev-parse
+  --is-inside-work-tree` sees the project's folder, a folder inside a repo
+  counting as in it; no `git` on PATH counts as outside) the pane opens a
+  plain shell instead, and `corral up` reports the skip as it reports a
+  missing program. For lazygit, which has nothing to show outside a repo
+  (#42).
+
+An empty list, a duplicate name, a `split` naming a missing or later pane,
+another direction, a percent out of range or a second `focus` is a config
+error (exit 2). `enabled = false` still drops the tab.
+
+**The old keys are a shorthand for today's shape.** `top`, `bottom_left`,
+`bottom_right`, `top_percent` and `bottom_left_percent` keep working and
+expand to three panes named `top`, `bottom_left` (splits `top` down,
+`percent` = 100 − `top_percent`, focused) and `bottom_right` (splits
+`bottom_left` right, `percent` = 100 − `bottom_left_percent`). In the
+shorthand a pane whose program is `lazygit` is `git_only`, so existing files
+get #42 without an edit. A file with no layout gets the shorthand's
+defaults. Setting both a shorthand key and `panes` is a config error.
+
+**The JSON is the list.** `corral config show --json` prints `utility` as
+`{enabled, panes: [...]}`, with the shorthand expanded; the old keys are no
+longer in it. Each pane carries all its fields (`split`, `direction` and
+`percent` null on the first).
+
+**Saving keeps the form.** The settings screen writes the shorthand when the
+file already uses it and the layout can still be said in it; otherwise it
+writes `[[utility.panes]]` and removes the shorthand keys. As DEC-6 says,
+saving unchanged settings leaves the file alone. `corral config init` writes
+the default layout as a pane list.
+
+**The settings screen edits presets, commands and sizes.** Its Utility tab
+offers a few shapes: one pane (`main`); side by side (`left`, `right`);
+stacked (`top`, `bottom`); top and two below (`top`, `bottom_left`,
+`bottom_right`, the default); left and two on the right (`left`,
+`top_right`, `bottom_right`); a grid of four (`top_left`, `bottom_left`,
+`top_right`, `bottom_right`, built in that order). Each pane gets a command,
+a size and a *git only* switch, and the diagram draws the layout to scale.
+Switching shape keeps the commands by position; new panes start as plain
+shells at 50%. A layout from the file that matches no preset's splits shows
+as *Custom*: its commands, sizes and switches stay editable, and its shape
+is changed in the file. Nothing is written until Save. (#21, #42)
