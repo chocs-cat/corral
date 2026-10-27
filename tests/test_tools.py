@@ -50,7 +50,9 @@ def test_program():
 def test_status_lists_known_tools_then_other_pane_programs(path):
     path["yazi"] = "/bin/yazi"
     path["brew"] = "/bin/brew"
-    cfg = Config(utility=Utility(top="yazi", bottom_left="htop -d 5", bottom_right="lazygit"))
+    cfg = Config(
+        utility=Utility.shorthand(top="yazi", bottom_left="htop -d 5", bottom_right="lazygit")
+    )
     rows = {s.name: s for s in tools.status(cfg)}
     assert list(rows) == ["yazi", "lazygit", "htop"]
     assert rows["yazi"].installed
@@ -61,7 +63,7 @@ def test_status_lists_known_tools_then_other_pane_programs(path):
     assert rows["htop"].summary == ""
     assert rows["htop"].install is None
     assert [s.name for s in tools.missing(cfg)] == ["lazygit"]  # htop: not ours to install
-    unused = replace(cfg, utility=replace(cfg.utility, bottom_right=""))
+    unused = replace(cfg, utility=Utility.shorthand(bottom_left="htop -d 5", bottom_right=""))
     assert tools.missing(unused) == []
 
 

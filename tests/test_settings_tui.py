@@ -67,7 +67,7 @@ async def test_save_applies_root_and_utility(app, cfg_path, tmp_path):
         await settle(pilot, app)
         assert not isinstance(app.screen, SettingsScreen)
         assert app.cfg.root == other
-        assert app.cfg.utility.top == "htop"
+        assert app.cfg.utility.panes[0].command == "htop"
         assert list(app.ptree.nodes) == ["~", "alpha"]  # re-scanned the new root
     data = saved(cfg_path)
     assert data["root"] == str(other)
@@ -105,6 +105,52 @@ async def test_nested_folders_switch_shows_the_files_value(herdr, cfg_path, monk
     async with app.run_test(size=(160, 50)) as pilot:
         s = await open_settings(pilot, app)
         assert s.query_one("#nested-folders", Switch).value is True
+
+
+CUSTOM_PANES = """\
+[utility]
+# two side by side
+[[utility.panes]]
+name = "[files]"
+command = "yazi"
+focus = false
+git_only = false
+
+[[utility.panes]]
+name = "git"
+command = "printf '[/x]'"
+split = "[files]"
+direction = "right"
+percent = 40
+focus = true
+git_only = false
+"""
+
+
+async def test_a_layout_the_inputs_cant_say_is_shown_and_kept(herdr, cfg_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    head = cfg_path.read_text().split("\n\n[utility]")[0]
+    cfg_path.write_text(f"{head}\n\n{CUSTOM_PANES}")
+    app = CorralApp(config.load(cfg_path), herdr, config_path=cfg_path)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        keys = ("top", "bottom_left", "bottom_right", "top_percent", "bottom_left_percent")
+        assert all(s.query_one(f"#util-{k}", Input).disabled for k in keys)
+        s.query_one("#util-enabled", Switch).value = False
+        s.query_one("#util-enabled", Switch).value = True
+        await pilot.pause(0.1)
+        assert all(s.query_one(f"#util-{k}", Input).disabled for k in keys)
+        assert "change it in the config file" in str(s.query_one("#util-note").render())
+        assert str(s.query_one("#util-diagram").render()) == "[files]: yazi\ngit: printf '[/x]'"
+        await show_tab(pilot, s, "tab-general")
+        await pilot.click("#nested-folders")
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    text = cfg_path.read_text()
+    assert "nested_folders = true" in text
+    assert text.endswith(CUSTOM_PANES)
 
 
 async def test_add_remove_and_reorder_default_agents(app, cfg_path):

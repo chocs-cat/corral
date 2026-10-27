@@ -1,5 +1,7 @@
 import json
 import subprocess
+import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -33,8 +35,7 @@ def test_default_toml_round_trips(tmp_path, monkeypatch):
     cfg = config.load(f)
     assert cfg.path == f
     assert cfg.models == config.builtin_models()
-    assert cfg.utility.top == "yazi"
-    assert (cfg.utility.top_percent, cfg.utility.bottom_left_percent) == (50, 35)
+    assert cfg.utility == config.Utility()
     assert cfg.nested_folders is False
 
 
@@ -101,8 +102,9 @@ def test_utility_sizes(tmp_path):
     f = tmp_path / "c.toml"
     f.write_text("[utility]\ntop_percent = 40\nbottom_left_percent = 60\n")
     u = config.load_file(f).utility
-    assert (u.top_percent, u.bottom_left_percent) == (40, 60)
-    assert u.bottom_right == "lazygit"  # unset keys keep their defaults
+    # unset keys keep their defaults
+    assert u == config.Utility.shorthand(top_percent=40, bottom_left_percent=60)
+    assert [p.percent for p in u.panes] == [None, 60, 40]
     for bad in ("5", "95", "true", '"50"', "50.0"):
         f.write_text(f"[utility]\ntop_percent = {bad}\n")
         with pytest.raises(ConfigError, match="top_percent"):
@@ -284,3 +286,173 @@ def test_expand_user(home):
     assert config.expand_user("~/x") == home / "x"
     assert config.expand_user(Path("rel/x")) == Path("rel/x")
     assert config.expand_user("~nosuchuser-zz/x") is None
+
+
+# --- the utility tab's panes (DEC-27) ----------------------------------------
+
+DEFAULT_PANES = """\
+[utility]
+[[utility.panes]]
+name = "top"
+command = "yazi"
+focus = false
+git_only = false
+
+[[utility.panes]]
+name = "bottom_left"
+command = ""
+split = "top"
+direction = "down"
+percent = 50
+focus = true
+git_only = false
+
+[[utility.panes]]
+name = "bottom_right"
+command = "lazygit"
+split = "bottom_left"
+direction = "right"
+percent = 65
+focus = false
+git_only = true
+"""
+
+
+def utility_of(text: str) -> config.Utility:
+    return config.from_dict(tomllib.loads(text)).utility
+
+
+def test_shorthand_default_and_list_give_the_same_panes():
+    default = config.Utility()
+    assert utility_of("") == default
+    assert utility_of("[utility]\n") == default
+    assert utility_of('[utility]\ntop = "yazi"\n') == default  # partial shorthand
+    full = '[utility]\ntop = "yazi"\nbottom_left = ""\nbottom_right = "lazygit"\n'
+    assert utility_of(full + "top_percent = 50\nbottom_left_percent = 35\n") == default
+    assert utility_of(DEFAULT_PANES) == default
+    assert default == config.Utility.shorthand()
+    assert [p.name for p in default.panes] == ["top", "bottom_left", "bottom_right"]
+    assert default.focused().name == "bottom_left"
+
+
+def test_shorthand_lazygit_is_git_only_by_its_program():
+    def git_only(u):
+        return [p.name for p in u.panes if p.git_only]
+
+    assert git_only(config.Utility.shorthand()) == ["bottom_right"]
+    assert git_only(config.Utility.shorthand(bottom_right="htop")) == []
+    assert git_only(config.Utility.shorthand(bottom_right="lazygit -p .")) == ["bottom_right"]
+    assert git_only(config.Utility.shorthand(bottom_right="/opt/bin/lazygit")) == []
+    assert git_only(config.Utility.shorthand(top="lazygit")) == ["top", "bottom_right"]
+
+
+def test_list_defaults_and_ignored_keys():
+    u = utility_of(
+        '[[utility.panes]]\nname = "main"\ncolour = "red"\n'
+        '[[utility.panes]]\nname = "git"\ncommand = "lazygit"\n'
+        'split = "main"\ndirection = "right"\npercent = 30\n'
+    )
+    assert u.panes == (
+        config.Pane("main"),
+        config.Pane("git", "lazygit", "main", "right", 30),  # only the shorthand sets git_only
+    )
+    assert u.focused().name == "main"  # the first plain shell
+    assert (
+        utility_of('[utility]\nenabled = false\n[[utility.panes]]\nname = "a"\n').enabled is False
+    )
+
+
+def test_focus_rule():
+    one = config.Pane("a", "x")
+    two = config.Pane("b", "y", "a", "down", 50)
+    assert config.Utility(panes=(one, two)).focused() == one  # no shell: the first
+    assert config.Utility(panes=(one, replace(two, command=""))).focused().name == "b"
+    assert config.Utility(panes=(one, replace(two, focus=True))).focused().name == "b"
+
+
+PANE_A = '[[utility.panes]]\nname = "a"\n'
+
+
+def later(**keys) -> str:
+    """A second pane, splitting "a", with `keys` replacing or (None) dropping
+    its fields."""
+    fields = {"name": '"b"', "split": '"a"', "direction": '"down"', "percent": "50"}
+    fields.update(keys)
+    body = "".join(f"{k} = {v}\n" for k, v in fields.items() if v is not None)
+    return PANE_A + "[[utility.panes]]\n" + body
+
+
+@pytest.mark.parametrize(
+    ("body", "msg"),
+    [
+        ('[utility]\npanes = "a"\n', "utility.panes: expected an array of tables"),
+        ("[utility]\npanes = []\n", "utility.panes: expected at least one pane"),
+        ("[utility]\npanes = [1]\n", r"utility.panes\[0\]: expected a table"),
+        ('[[utility.panes]]\ncommand = "x"\n', r"utility.panes\[0\]: name is required"),
+        ("[[utility.panes]]\nname = 3\n", r"utility.panes\[0\]: name is required"),
+        ('[[utility.panes]]\nname = "  "\n', r"utility.panes\[0\]: name is required"),
+        (later(name='"a"'), r"utility.panes\[1\] 'a': duplicate name"),
+        (PANE_A + "command = 1\n", r"utility.panes\[0\] 'a': command: expected str"),
+        (later(split="1"), r"utility.panes\[1\] 'b': split: expected str"),
+        (later(direction="1"), r"utility.panes\[1\] 'b': direction: expected str"),
+        (PANE_A + 'focus = "yes"\n', r"utility.panes\[0\] 'a': focus: expected bool"),
+        (PANE_A + "git_only = 1\n", r"utility.panes\[0\] 'a': git_only: expected bool"),
+        (
+            PANE_A + 'direction = "down"\n',
+            r"utility.panes\[0\] 'a': the first pane splits nothing; remove split, "
+            "direction and percent",
+        ),
+        (later(split=None), r"utility.panes\[1\] 'b': split is required"),
+        (later(direction=None), r"utility.panes\[1\] 'b': direction is required"),
+        (later(percent=None), r"utility.panes\[1\] 'b': percent is required"),
+        (later(split='"c"'), r"utility.panes\[1\] 'b': split: no earlier pane named 'c'"),
+        (later(split='"b"'), r"utility.panes\[1\] 'b': split: no earlier pane named 'b'"),
+        (
+            later(direction='"up"'),
+            r"utility.panes\[1\] 'b': direction: expected \"right\" or \"down\"",
+        ),
+        *(
+            (
+                later(percent=bad),
+                r"utility.panes\[1\] 'b': percent: expected a whole number, 10 to 90",
+            )
+            for bad in ("9", "91", "true", '"50"', "50.0")
+        ),
+        (
+            PANE_A + "focus = true\n" + later(focus="true").removeprefix(PANE_A),
+            r"utility.panes\[1\] 'b': focus is already set on 'a'",
+        ),
+        (
+            '[utility]\ntop = "x"\n[[utility.panes]]\nname = "a"\n',
+            r"utility: set panes or the shorthand keys \(top, bottom_left, bottom_right, "
+            r"top_percent, bottom_left_percent\), not both",
+        ),
+    ],
+)
+def test_bad_utility_panes(body, msg):
+    with pytest.raises(ConfigError, match=f"^{msg}$"):
+        utility_of(body)
+
+
+def test_as_shorthand():
+    default = config.Utility()
+    values = {
+        "top": "yazi",
+        "bottom_left": "",
+        "bottom_right": "lazygit",
+        "top_percent": 50,
+        "bottom_left_percent": 35,
+    }
+    assert default.as_shorthand() == values
+    sized = config.Utility.shorthand(enabled=False, top_percent=70, bottom_left_percent=20)
+    assert sized.as_shorthand() == {**values, "top_percent": 70, "bottom_left_percent": 20}
+    top, left, right = default.panes
+    for panes in (
+        (top, right, left),  # reordered
+        (replace(top, name="files"), replace(left, split="files"), right),  # renamed
+        (replace(top, focus=True), replace(left, focus=False), right),  # focus moved
+        (top, left, replace(right, git_only=False)),  # git_only off on lazygit
+        (top, left, right, config.Pane("more", "", "top", "right", 50)),  # a fourth pane
+        (top,),
+    ):
+        assert config.Utility(panes=panes).as_shorthand() is None

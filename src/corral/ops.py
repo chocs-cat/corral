@@ -151,17 +151,28 @@ def start_agent(
 def build_utility_tab(
     h: Herdr, cfg: Config, tab: str, root_pane: str, cwd: str, label: str, report: Report
 ) -> str:
-    """Turn a tab's single pane into top / bottom-left / bottom-right, sized
-    by the config's percentages, label it, and leave its focus on the
-    bottom-left pane (returned)."""
+    """Label the tab and build the configured panes from its single one, in
+    list order: each later pane splits an earlier one (DEC-27). Runs each
+    pane's command and returns the pane left with the focus."""
     u = cfg.utility
+    focused = u.focused()
     h.rename_tab(tab, label)
-    # herdr's --ratio is the share the split pane keeps: the top, then the left.
-    bottom_left = h.split(root_pane, "down", cwd, focus=True, ratio=u.top_percent / 100)
-    bottom_right = h.split(
-        bottom_left, "right", cwd, focus=False, ratio=u.bottom_left_percent / 100
-    )
-    for pane, cmd in zip((root_pane, bottom_left, bottom_right), u.panes().values(), strict=True):
+    ids = {u.panes[0].name: root_pane}
+    for pane in u.panes[1:]:
+        # from_dict guarantees a later pane's split, direction and percent.
+        assert pane.split
+        assert pane.direction
+        assert pane.percent
+        # herdr's --ratio is the share the split pane keeps; percent is the new pane's.
+        ids[pane.name] = h.split(
+            ids[pane.split],
+            pane.direction,
+            cwd,
+            focus=pane.name == focused.name,
+            ratio=(100 - pane.percent) / 100,
+        )
+    for pane in u.panes:
+        cmd = pane.command
         if not cmd:
             continue
         prog = tools.program(cmd)
@@ -170,12 +181,12 @@ def build_utility_tab(
             report(f"  skip   {cmd} — not installed (plain shell instead{hint})", error=True)
             continue
         try:
-            h.pane_run(pane, cmd)
+            h.pane_run(ids[pane.name], cmd)
         except HerdrError as e:
             report(f"  warn   {cmd} failed to launch: {e.message}", error=True)
-    parts = " / ".join(c or "shell" for c in u.panes().values())
+    parts = " / ".join(p.command or "shell" for p in u.panes)
     report(f"  added  {label} ({parts})")
-    return bottom_left
+    return ids[focused.name]
 
 
 def make_agent_tab(

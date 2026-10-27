@@ -49,7 +49,7 @@ def test_edits_keep_comments_and_add_only_what_changed(cfg_file):
     c = config.load_file(cfg_file)
     c.root = Path("~/Work").expanduser()
     c.scan_depth = 2
-    c.utility = replace(c.utility, top="nnn")
+    c.utility = config.Utility.shorthand(top="nnn")
     config.save(c, cfg_file)
     text = cfg_file.read_text()
     assert 'root = "~/Work"   # where my projects live' in text

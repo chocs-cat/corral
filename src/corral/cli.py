@@ -272,7 +272,9 @@ def cmd_tools(ctx: Ctx) -> int:
         print(f"{t.name} — {t.summary}: {t.detail}" if t.summary else t.name)
         facts = [f"installed: {config.tilde(Path(t.path))}" if t.path else "not installed"]
         if t.panes:
-            facts.append("runs in the " + ", ".join(PANE_NAMES[p] for p in t.panes) + " pane")
+            facts.append(
+                "runs in the " + ", ".join(PANE_NAMES.get(p, p) for p in t.panes) + " pane"
+            )
         elif t.summary:
             facts.append("not used by the utility tab")
         if not t.installed and t.install:

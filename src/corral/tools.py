@@ -12,7 +12,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import IO
 
-from corral.config import Config
+from corral.config import Config, program
 
 
 @dataclass(frozen=True)
@@ -59,16 +59,6 @@ def known(name: str) -> Tool | None:
     return next((t for t in TOOLS if t.name == name), None)
 
 
-def program(cmd: str) -> str | None:
-    """The program a pane command runs: "lazygit" for "lazygit -p .", None
-    for a plain shell ("") or a command that can't be parsed."""
-    try:
-        words = shlex.split(cmd)
-    except ValueError:
-        return None
-    return words[0] if words else None
-
-
 def recipe(tool: Tool) -> Recipe | None:
     """How to install tool here: the first recipe whose manager is on PATH."""
     return next((r for r in tool.recipes if shutil.which(r.manager)), None)
@@ -106,9 +96,9 @@ def status_of(name: str, panes: list[str] | None = None) -> ToolStatus:
 def status(cfg: Config) -> list[ToolStatus]:
     """The tools corral knows, then any other program a utility pane runs."""
     used: dict[str, list[str]] = {t.name: [] for t in TOOLS}
-    for pane, cmd in cfg.utility.panes().items():
-        if prog := program(cmd):
-            used.setdefault(prog, []).append(pane)
+    for pane in cfg.utility.panes:
+        if prog := program(pane.command):
+            used.setdefault(prog, []).append(pane.name)
     return [status_of(name, panes) for name, panes in used.items()]
 
 
