@@ -110,7 +110,10 @@ class FakeHerdr:
     def split(self, pane: str, direction: str, cwd: str, *, focus: bool, ratio: float = 0.5) -> str:
         p = self._need("pane", self.panes, pane)
         self.calls.append(("split", pane, direction, ratio))
-        return self._pane(p["ws"], p["tab"], cwd)
+        new = self._pane(p["ws"], p["tab"], cwd)
+        if focus:
+            self.focused.append(new)
+        return new
 
     def pane_run(self, pane: str, command: str) -> None:
         self._need("pane", self.panes, pane)["ran"].append(command)

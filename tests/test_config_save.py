@@ -1,5 +1,6 @@
 """config.save: writing settings back without losing the file's comments."""
 
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def test_edits_keep_comments_and_add_only_what_changed(cfg_file):
     c = config.load_file(cfg_file)
     c.root = Path("~/Work").expanduser()
     c.scan_depth = 2
-    c.utility = replace(c.utility, top="nnn")
+    c.utility = config.Utility.shorthand(top="nnn")
     config.save(c, cfg_file)
     text = cfg_file.read_text()
     assert 'root = "~/Work"   # where my projects live' in text
@@ -144,3 +145,120 @@ def test_default_nested_folders_is_not_added_to_a_file_without_it(cfg_file):
     assert c.nested_folders is False
     config.save(c, cfg_file)
     assert "nested_folders" not in cfg_file.read_text()  # DEC-6
+
+
+# --- [utility]: the shorthand or the pane list (DEC-27) ----------------------
+
+PANE_LIST = """\
+root = "~/Code"
+
+[utility]
+# two side by side
+[[utility.panes]]
+name = "files"   # the file manager
+command = "yazi"
+focus = false
+
+[[utility.panes]]
+# a shell, no command
+name = "shell"
+split = "files"
+direction = "right"
+percent = 40
+"""
+
+
+def save_and_reload(c: config.Config, f: Path) -> str:
+    config.save(c, f)
+    assert config.load_file(f).utility == c.utility
+    return f.read_text()
+
+
+def test_a_pane_list_saved_unchanged_stays_byte_identical(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    f = tmp_path / "c.toml"
+    f.write_text(PANE_LIST)
+    config.save(config.load_file(f), f)
+    assert f.read_text() == PANE_LIST
+
+
+def test_changing_a_command_keeps_each_form(cfg_file, tmp_path, monkeypatch):
+    c = config.load_file(cfg_file)
+    c.utility = config.Utility.shorthand(top="nnn")
+    text = save_and_reload(c, cfg_file)
+    assert text == HAND_WRITTEN.replace('top = "yazi"', 'top = "nnn"')
+
+    f = tmp_path / "c.toml"
+    f.write_text(PANE_LIST)
+    c = config.load_file(f)
+    files, shell = c.utility.panes
+    c.utility = replace(c.utility, panes=(replace(files, command="nnn"), shell))
+    text = save_and_reload(c, f)
+    want = PANE_LIST.replace('command = "yazi"', 'command = "nnn"')
+    assert text == want.replace("percent = 40\n", 'percent = 40\ncommand = ""\n')
+
+
+def test_a_layout_the_shorthand_cant_say_turns_the_file_into_a_list(cfg_file):
+    c = config.load_file(cfg_file)
+    extra = config.Pane("more", "htop", "top", "right", 30)
+    c.utility = replace(c.utility, panes=(*c.utility.panes, extra))
+    text = save_and_reload(c, cfg_file)
+    assert "[[utility.panes]]" in text
+    table = tomllib.loads(text)["utility"]
+    assert not set(config.SHORTHAND_KEYS) & set(table)
+    assert [p["name"] for p in table["panes"]] == ["top", "bottom_left", "bottom_right", "more"]
+    assert "percent = 30\n\n# my models\n[[models]]" in text  # still leads into the models
+    assert "# the big one" in text
+
+
+def test_a_list_that_fits_the_shorthand_stays_a_list(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    f = tmp_path / "c.toml"
+    f.write_text(config.DEFAULT_TOML)
+    c = config.load_file(f)
+    c.utility = config.Utility.shorthand(top="nnn")
+    text = save_and_reload(c, f)
+    assert text == config.DEFAULT_TOML.replace('command = "yazi"', 'command = "nnn"')
+
+
+def test_a_file_without_utility_gets_only_what_differs(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    f = tmp_path / "c.toml"
+    f.write_text('root = "~/Code"\n')
+    c = config.load_file(f)
+    c.utility = config.Utility.shorthand(bottom_right="tig")
+    assert save_and_reload(c, f) == 'root = "~/Code"\n\n[utility]\nbottom_right = "tig"\n'
+
+    f.write_text('root = "~/Code"\n')
+    c.utility = config.Utility(enabled=False, panes=(config.Pane("main"),))
+    text = save_and_reload(c, f)
+    assert tomllib.loads(text)["utility"] == {
+        "enabled": False,
+        "panes": [{"name": "main", "command": ""}],
+    }
+
+
+def test_reordering_panes_reuses_each_table(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    f = tmp_path / "c.toml"
+    f.write_text(PANE_LIST)
+    c = config.load_file(f)
+    files, shell = c.utility.panes
+    c.utility = replace(
+        c.utility,
+        panes=(
+            replace(shell, split=None, direction=None, percent=None),
+            replace(files, split="shell", direction="down", percent=60),
+        ),
+    )
+    text = save_and_reload(c, f)
+    assert text.index("# a shell, no command") < text.index('name = "files"   # the file manager')
+    assert "\n\n\n" not in text
+    first = tomllib.loads(text)["utility"]["panes"][0]
+    assert first == {"name": "shell", "command": ""}  # split, direction and percent removed
+
+
+def test_the_template_is_the_default_layout_as_a_list():
+    assert config.from_dict(tomllib.loads(config.DEFAULT_TOML)).utility == config.Utility()
+    assert "[[utility.panes]]" in config.DEFAULT_TOML
+    assert not set(config.SHORTHAND_KEYS) & set(tomllib.loads(config.DEFAULT_TOML)["utility"])

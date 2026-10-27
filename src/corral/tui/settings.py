@@ -442,6 +442,9 @@ class SettingsScreen(Screen[Config | None]):
         self.hidden: set[str] = set(self.orig.hide_models)
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
+        # The five inputs edit the shorthand's layout; any other layout is
+        # edited in the file for now (DEC-27).
+        self.shorthand = self.orig.utility.as_shorthand()
         self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
 
     # layout
@@ -505,10 +508,15 @@ class SettingsScreen(Screen[Config | None]):
                     "seconds to wait for a new agent to be ready (max 300)", classes="hint"
                 )
             with TabPane("Utility tab", id="tab-utility"):
+                sh = self.shorthand or {}
                 yield Static(
                     "The first tab of every workspace: one pane on top, two below. Give each "
-                    "pane a command to run, or leave it empty for a plain shell.",
+                    "pane a command to run, or leave it empty for a plain shell."
+                    if self.shorthand is not None
+                    else "This file's utility layout isn't one pane on top and two below; "
+                    "change it in the config file.",
                     classes="note",
+                    id="util-note",
                 )
                 with Horizontal(classes="row"):
                     yield Label("Utility tab", classes="field")
@@ -517,7 +525,7 @@ class SettingsScreen(Screen[Config | None]):
                     with Horizontal(classes="row"):
                         yield Label(title, classes="field")
                         yield Input(
-                            getattr(c.utility, key),
+                            sh.get(key, ""),
                             placeholder="(plain shell)",
                             id=f"util-{key}",
                         )
@@ -526,7 +534,7 @@ class SettingsScreen(Screen[Config | None]):
                     yield Label("Sizes", classes="field")
                     for key, title in UTILITY_SIZES:
                         yield Input(
-                            str(getattr(c.utility, key)),
+                            str(sh.get(key, "")),
                             type="integer",
                             id=f"util-{key}",
                             classes="percent",
@@ -793,7 +801,7 @@ class SettingsScreen(Screen[Config | None]):
     def util_toggled(self) -> None:
         on_ = self.query_one("#util-enabled", Switch).value
         for key, _ in UTILITY_PANES + UTILITY_SIZES:
-            self.query_one(f"#util-{key}", Input).disabled = not on_
+            self.query_one(f"#util-{key}", Input).disabled = not on_ or self.shorthand is None
         self.update_util_diagram()
 
     def util_percent(self, key: str) -> int | None:
@@ -805,6 +813,8 @@ class SettingsScreen(Screen[Config | None]):
         return v if PERCENT_MIN <= v <= PERCENT_MAX else None
 
     def update_util_status(self, key: str) -> None:
+        if self.shorthand is None:
+            return
         cmd = self.query_one(f"#util-{key}", Input).value
         self.query_one(f"#util-{key}-status", Static).update(command_status(cmd))
 
@@ -813,16 +823,24 @@ class SettingsScreen(Screen[Config | None]):
         if not self.query_one("#util-enabled", Switch).value:
             diagram.update("no utility tab: a workspace starts with its agent tabs")
             return
+        if self.shorthand is None:
+            # Names and commands come from the file: Text, not markup.
+            diagram.update(
+                Text(
+                    "\n".join(f"{p.name}: {p.command or 'shell'}" for p in self.orig.utility.panes)
+                )
+            )
+            return
         top, left, right = (
             tools.program(self.query_one(f"#util-{k}", Input).value) or "shell"
             for k, _ in UTILITY_PANES
         )
-        u = self.orig.utility
+        sh = self.shorthand
         diagram.update(
             utility_diagram(
                 (top, left, right),
-                self.util_percent("top_percent") or u.top_percent,
-                self.util_percent("bottom_left_percent") or u.bottom_left_percent,
+                self.util_percent("top_percent") or sh["top_percent"],
+                self.util_percent("bottom_left_percent") or sh["bottom_left_percent"],
             )
         )
 
@@ -1101,11 +1119,22 @@ class SettingsScreen(Screen[Config | None]):
         refresh = number("refresh", "refresh interval")
         if not 0.5 <= refresh <= 3600:
             raise ConfigError("refresh interval: use 0.5 to 3600 seconds")
-        sizes: dict[str, int] = {}
-        for key, title in UTILITY_SIZES:
-            sizes[key] = number(f"util-{key}", title.lower(), int)
-            if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
-                raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
+        enabled = self.query_one("#util-enabled", Switch).value
+        if self.shorthand is None:  # a layout only the file edits
+            utility = replace(self.orig.utility, enabled=enabled)
+        else:
+            sizes: dict[str, int] = {}
+            for key, title in UTILITY_SIZES:
+                sizes[key] = number(f"util-{key}", title.lower(), int)
+                if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
+                    raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
+            utility = Utility.shorthand(
+                enabled,
+                top=self.query_one("#util-top", Input).value.strip(),
+                bottom_left=self.query_one("#util-bottom_left", Input).value.strip(),
+                bottom_right=self.query_one("#util-bottom_right", Input).value.strip(),
+                **sizes,
+            )
         return replace(
             self.orig,
             root=Path(root_text).expanduser(),
@@ -1116,14 +1145,7 @@ class SettingsScreen(Screen[Config | None]):
             default_agents=tuple(self.default_agents),
             refresh_seconds=refresh,
             agent_timeout_ms=int(timeout * 1000),
-            utility=Utility(
-                enabled=self.query_one("#util-enabled", Switch).value,
-                top=self.query_one("#util-top", Input).value.strip(),
-                bottom_left=self.query_one("#util-bottom_left", Input).value.strip(),
-                bottom_right=self.query_one("#util-bottom_right", Input).value.strip(),
-                top_percent=sizes["top_percent"],
-                bottom_left_percent=sizes["bottom_left_percent"],
-            ),
+            utility=utility,
             harnesses={h.name: self.harness_settings(h.name) for h in harnesses.HARNESSES},
             custom_models=tuple(self.custom),
             hide_models=frozenset(self.hidden),

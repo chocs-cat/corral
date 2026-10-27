@@ -261,23 +261,122 @@ def _default_harnesses() -> dict[str, HarnessSettings]:
     return {name: HarnessSettings() for name in HARNESS_NAMES}
 
 
+def program(cmd: str) -> str | None:
+    """The program a pane command runs: "lazygit" for "lazygit -p .", None
+    for a plain shell ("") or a command that can't be parsed."""
+    try:
+        words = shlex.split(cmd)
+    except ValueError:
+        return None
+    return words[0] if words else None
+
+
+@dataclass(frozen=True)
+class Pane:
+    """One pane of the utility tab (DEC-27). The first pane is the tab's own;
+    each later one splits an earlier pane (`split`, by name) `right` or
+    `down`, taking `percent` of it. `command` "" is a plain shell; a
+    `git_only` pane is a plain shell outside a git work tree."""
+
+    name: str
+    command: str = ""
+    split: str | None = None
+    direction: str | None = None
+    percent: int | None = None
+    focus: bool = False
+    git_only: bool = False
+
+
+# The old [utility] keys, now a shorthand for one pane on top and two below.
+SHORTHAND_KEYS = ("top", "bottom_left", "bottom_right", "top_percent", "bottom_left_percent")
+DIRECTIONS = ("right", "down")
+
+
+def _shorthand_panes(
+    top: str = "yazi",
+    bottom_left: str = "",
+    bottom_right: str = "lazygit",
+    top_percent: int = 50,
+    bottom_left_percent: int = 35,
+) -> tuple[Pane, ...]:
+    """The shorthand's three panes (DEC-27); a lazygit pane is git-only."""
+
+    def git_only(cmd: str) -> bool:
+        return program(cmd) == "lazygit"
+
+    return (
+        Pane("top", top, git_only=git_only(top)),
+        Pane(
+            "bottom_left",
+            bottom_left,
+            "top",
+            "down",
+            100 - top_percent,
+            focus=True,
+            git_only=git_only(bottom_left),
+        ),
+        Pane(
+            "bottom_right",
+            bottom_right,
+            "bottom_left",
+            "right",
+            100 - bottom_left_percent,
+            git_only=git_only(bottom_right),
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class Utility:
-    """The utility tab: one pane on top, two below. Each is a command to run,
-    or "" for a plain shell. Missing commands degrade to a shell. The sizes
-    are percentages: the top pane's share of the tab's height, and the
-    bottom-left pane's share of the bottom row's width."""
+    """The utility tab: its panes in the order they are built (DEC-27). The
+    default is the shorthand's: yazi on top, a shell and lazygit below."""
 
     enabled: bool = True
-    top: str = "yazi"
-    bottom_left: str = ""
-    bottom_right: str = "lazygit"
-    top_percent: int = 50
-    bottom_left_percent: int = 35
+    panes: tuple[Pane, ...] = field(default_factory=_shorthand_panes)
 
-    def panes(self) -> dict[str, str]:
-        """Pane name -> command, top first."""
-        return {"top": self.top, "bottom_left": self.bottom_left, "bottom_right": self.bottom_right}
+    @classmethod
+    def shorthand(
+        cls,
+        enabled: bool = True,
+        top: str = "yazi",
+        bottom_left: str = "",
+        bottom_right: str = "lazygit",
+        top_percent: int = 50,
+        bottom_left_percent: int = 35,
+    ) -> Utility:
+        """The layout the old keys describe: one pane on top, two below.
+        The sizes are the top pane's share of the tab's height and the
+        bottom-left pane's share of the bottom row's width."""
+        return cls(
+            enabled,
+            _shorthand_panes(top, bottom_left, bottom_right, top_percent, bottom_left_percent),
+        )
+
+    def as_shorthand(self) -> dict | None:
+        """The five shorthand values that give this layout, or None when the
+        shorthand can't say it."""
+        if [p.name for p in self.panes] != ["top", "bottom_left", "bottom_right"]:
+            return None
+        top, left, right = self.panes
+        if left.percent is None or right.percent is None:
+            return None
+        values = {
+            "top": top.command,
+            "bottom_left": left.command,
+            "bottom_right": right.command,
+            "top_percent": 100 - left.percent,
+            "bottom_left_percent": 100 - right.percent,
+        }
+        return values if Utility.shorthand(self.enabled, **values) == self else None
+
+    def focused(self) -> Pane:
+        """The pane that gets the focus (DEC-27): the one with `focus` set,
+        else the first plain shell, else the first pane."""
+        return (
+            next((p for p in self.panes if p.focus), None)
+            or next((p for p in self.panes if not p.command), None)
+            or self.panes[0]
+        )
 
 
 @dataclass
@@ -396,6 +495,81 @@ def _percent(table: dict, key: str, default: int) -> int:
     return v
 
 
+def _utility(u: dict) -> Utility:
+    """[utility]: the pane list or the shorthand keys, not both (DEC-27)."""
+    enabled = bool(u.get("enabled", True))
+    shorthand = [k for k in SHORTHAND_KEYS if k in u]
+    if "panes" in u and shorthand:
+        raise ConfigError(
+            f"utility: set panes or the shorthand keys ({', '.join(SHORTHAND_KEYS)}), not both"
+        )
+    if "panes" in u:
+        return Utility(enabled, _panes(u["panes"]))
+    kw: dict = {k: str(u[k]) for k in SHORTHAND_KEYS[:3] if k in u}
+    kw |= {k: _percent(u, k, 0) for k in SHORTHAND_KEYS[3:] if k in u}
+    return Utility.shorthand(enabled, **kw)
+
+
+def _panes(value) -> tuple[Pane, ...]:
+    """[[utility.panes]], checked in list order (DEC-27)."""
+    if not isinstance(value, list):
+        raise ConfigError("utility.panes: expected an array of tables")
+    if not value:
+        raise ConfigError("utility.panes: expected at least one pane")
+    panes: list[Pane] = []
+    for i, t in enumerate(value):
+        if not isinstance(t, dict):
+            raise ConfigError(f"utility.panes[{i}]: expected a table")
+        name = t.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"utility.panes[{i}]: name is required")
+        where = f"utility.panes[{i}] '{name}': "
+        if any(p.name == name for p in panes):
+            raise ConfigError(f"{where}duplicate name")
+        for key, kind in (("command", str), ("split", str), ("direction", str)):
+            if key in t:
+                _expect(t, key, kind, where)
+        for key in ("focus", "git_only"):
+            if key in t:
+                _expect(t, key, bool, where)
+        if not panes:
+            if any(k in t for k in ("split", "direction", "percent")):
+                raise ConfigError(
+                    f"{where}the first pane splits nothing; remove split, direction and percent"
+                )
+        else:
+            for key in ("split", "direction", "percent"):
+                if key not in t:
+                    raise ConfigError(f"{where}{key} is required")
+            if not any(p.name == t["split"] for p in panes):
+                raise ConfigError(f"{where}split: no earlier pane named '{t['split']}'")
+            if t["direction"] not in DIRECTIONS:
+                raise ConfigError(f'{where}direction: expected "right" or "down"')
+            pct = t["percent"]
+            if (
+                isinstance(pct, bool)
+                or not isinstance(pct, int)
+                or not PERCENT_MIN <= pct <= PERCENT_MAX
+            ):
+                raise ConfigError(
+                    f"{where}percent: expected a whole number, {PERCENT_MIN} to {PERCENT_MAX}"
+                )
+        if t.get("focus") and (first := next((p for p in panes if p.focus), None)):
+            raise ConfigError(f"{where}focus is already set on '{first.name}'")
+        panes.append(
+            Pane(
+                name,
+                t.get("command", ""),
+                t.get("split"),
+                t.get("direction"),
+                t.get("percent"),
+                focus=t.get("focus", False),
+                git_only=t.get("git_only", False),
+            )
+        )
+    return tuple(panes)
+
+
 def from_dict(data: dict) -> Config:
     cfg = Config()
     if "root" in data:
@@ -416,16 +590,7 @@ def from_dict(data: dict) -> Config:
         cfg.agent_timeout_ms = _expect(data, "agent_timeout_ms", int)
 
     if "utility" in data:
-        u = _expect(data, "utility", dict)
-        base = Utility()
-        cfg.utility = Utility(
-            enabled=bool(u.get("enabled", base.enabled)),
-            top=str(u.get("top", base.top)),
-            bottom_left=str(u.get("bottom_left", base.bottom_left)),
-            bottom_right=str(u.get("bottom_right", base.bottom_right)),
-            top_percent=_percent(u, "top_percent", base.top_percent),
-            bottom_left_percent=_percent(u, "bottom_left_percent", base.bottom_left_percent),
-        )
+        cfg.utility = _utility(_expect(data, "utility", dict))
 
     if "harnesses" in data:
         cfg.harnesses = _default_harnesses()
@@ -515,14 +680,7 @@ def to_data(cfg: Config) -> dict:
         "default_agents": list(cfg.default_agents),
         "refresh_seconds": float(cfg.refresh_seconds),
         "agent_timeout_ms": cfg.agent_timeout_ms,
-        "utility": {
-            "enabled": u.enabled,
-            "top": u.top,
-            "bottom_left": u.bottom_left,
-            "bottom_right": u.bottom_right,
-            "top_percent": u.top_percent,
-            "bottom_left_percent": u.bottom_left_percent,
-        },
+        "utility": {"enabled": u.enabled, "panes": [_pane_data(p) for p in u.panes]},
         "harnesses": {name: {"command": h.command} for name, h in sorted(cfg.harnesses.items())},
         "models": [_model_data(m) for m in cfg.custom_models],
         "hide_models": sorted(cfg.hide_models),
@@ -533,6 +691,12 @@ def to_data(cfg: Config) -> dict:
         else:
             data["prune"] = sorted(cfg.prune)
     return data
+
+
+def _pane_data(p: Pane) -> dict:
+    data: dict = {"name": p.name, "command": p.command}
+    data |= {k: v for k in ("split", "direction", "percent") if (v := getattr(p, k)) is not None}
+    return data | {"focus": p.focus, "git_only": p.git_only}
 
 
 def _model_data(m: ModelSpec) -> dict:
@@ -573,26 +737,70 @@ def _put_table(table, value: dict, default: dict) -> None:
             table[k] = v
 
 
-def _put_models(doc, models: list[dict]) -> None:
-    """Update [[models]]: in place while the keys and their order are
-    unchanged; otherwise rebuild it in the new order, reusing each surviving
-    table (and the comments in it), one blank line apart."""
-    old = doc.get("models")
+def _put_tables(parent, key: str, items: list[dict], id_key: str, default: dict) -> None:
+    """Update an array of tables ([[models]], [[utility.panes]]): in place
+    while the ids (`id_key`) and their order are unchanged; otherwise
+    rebuild it in the new order, reusing each surviving table (and the
+    comments in it), one blank line apart."""
+    old = parent.get(key)
     tables = list(old) if isinstance(old, list) else []
-    if [str(t.get("key")) for t in tables] == [m["key"] for m in models]:
-        for t, m in zip(tables, models, strict=True):
-            _put_table(t, m, {})
+    if [str(t.get(id_key)) for t in tables] == [m[id_key] for m in items]:
+        for t, m in zip(tables, items, strict=True):
+            _put_table(t, m, default)
         return
-    by_key = {str(t.get("key")): t for t in tables}
+    by_id = {str(t.get(id_key)): t for t in tables}
     aot = tomlkit.aot()
-    for m in models:
-        t = by_key.get(m["key"]) or tomlkit.table()
-        _put_table(t, m, {})
+    for m in items:
+        t = by_id.get(m[id_key]) or tomlkit.table()
+        _put_table(t, m, default)
         body = t.value.body
         while body and body[-1][0] is None and isinstance(body[-1][1], Whitespace):
             body.pop()  # the aot puts one blank line between tables itself
         aot.append(t)
-    doc["models"] = aot
+    parent[key] = aot
+
+
+PANE_DEFAULTS = {"focus": False, "git_only": False}
+
+
+def _put_utility(doc, u: Utility) -> None:
+    """Write [utility] in the file's form (DEC-27): the shorthand keys while
+    the file uses them (or has no [utility]) and the layout fits them;
+    otherwise [[utility.panes]], with the shorthand keys removed. Panes the
+    file already says, however it words them, are left alone."""
+    table = doc.get("utility")
+    has_table = isinstance(table, dict)
+    shorthand = u.as_shorthand()
+    if shorthand is not None and not (has_table and "panes" in table):
+        value = {"enabled": u.enabled, **shorthand}
+        default = {"enabled": True, **(Utility().as_shorthand() or {})}
+        if has_table:
+            _put_table(table, value, default)
+        else:
+            doc["utility"] = {k: v for k, v in value.items() if v != default[k]}
+        return
+    if not has_table:
+        table = doc["utility"] = tomlkit.table()
+    for k in SHORTHAND_KEYS:
+        if k in table:
+            del table[k]
+    written = "enabled" in table or not u.enabled
+    if written and _plain(table.get("enabled")) != u.enabled:
+        table["enabled"] = u.enabled
+    try:
+        same = _panes(_plain(table["panes"])) == u.panes if "panes" in table else False
+    except ConfigError:
+        same = False
+    if same:
+        return
+    # Blank lines and comments at the table's end lead into what follows it:
+    # keep them after the panes when the panes are new here.
+    body = table.value.body
+    trailing = []
+    while "panes" not in table and body and body[-1][0] is None:
+        trailing.insert(0, body.pop())
+    _put_tables(table, "panes", [_pane_data(p) for p in u.panes], "name", PANE_DEFAULTS)
+    table["panes"][-1].value.body.extend(trailing)
 
 
 def save(cfg: Config, path: Path) -> None:
@@ -621,7 +829,9 @@ def save(cfg: Config, path: Path) -> None:
             continue
         if key == "models":
             if [_plain(t) for t in doc.get("models", [])] != value:
-                _put_models(doc, value)
+                _put_tables(doc, "models", value, "key", {})
+        elif key == "utility":
+            _put_utility(doc, cfg.utility)
         elif isinstance(value, dict) and isinstance(doc.get(key), dict):
             _put_table(doc[key], value, defaults.get(key, {}))
         elif isinstance(value, dict):
@@ -667,19 +877,42 @@ default_agents = ["sonnet/medium"]
 refresh_seconds = 3.0
 agent_timeout_ms = 60000
 
-# The utility tab: a pane on top, two below. Each value is a command, or ""
-# for a plain shell. A command that isn't installed falls back to a shell;
-# `corral tools` shows what's missing and `corral tools install` installs
-# yazi (a terminal file manager) and lazygit (a terminal UI for git).
-# top_percent is the top pane's share of the tab's height, and
-# bottom_left_percent the bottom-left pane's share of the bottom row (10-90).
+# The utility tab, the first tab of every workspace: its panes, in the order
+# they are built. The first pane is the tab's own; each later one splits an
+# earlier pane (`split`, by name) "right" or "down", and `percent` (10-90) is
+# its share of the pane it splits. `command` is what a pane runs: "" or none
+# is a plain shell, and so is a program that isn't installed; `corral tools`
+# shows what's missing and `corral tools install` installs yazi (a terminal
+# file manager) and lazygit (a terminal UI for git). A `git_only` pane is a
+# plain shell when the project isn't in a git repo. `focus = true` (on one
+# pane at most) picks the pane that starts focused; without it, the first
+# plain shell does, else the first pane.
+#
+# The older keys top, bottom_left, bottom_right, top_percent and
+# bottom_left_percent still work instead of panes (not together with them):
+# they describe this layout, a pane on top and two below.
 [utility]
 enabled = true
-top = "yazi"
-bottom_left = ""
-bottom_right = "lazygit"
-top_percent = 50
-bottom_left_percent = 35
+
+[[utility.panes]]
+name = "top"
+command = "yazi"
+
+[[utility.panes]]
+name = "bottom_left"
+command = ""
+split = "top"
+direction = "down"
+percent = 50
+focus = true
+
+[[utility.panes]]
+name = "bottom_right"
+command = "lazygit"
+split = "bottom_left"
+direction = "right"
+percent = 65
+git_only = true
 
 # Upgrading the agent CLIs: `corral harnesses upgrade`, or the settings
 # screen's Harnesses tab. corral upgrades Claude Code and Codex the way each

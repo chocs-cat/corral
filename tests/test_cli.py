@@ -57,6 +57,39 @@ def test_config_init_and_show(run, tmp_path, capsys):
     assert list(shown).index("nested_folders") == list(shown).index("scan_depth") + 1
 
 
+def test_config_show_prints_the_utility_panes(run, tmp_path, capsys):
+    assert run("config", "show") == 0
+    u = json.loads(capsys.readouterr().out)["utility"]
+    assert list(u) == ["enabled", "panes"]
+    assert u["enabled"] is True
+    assert [p["name"] for p in u["panes"]] == ["top", "bottom_left", "bottom_right"]
+    assert u["panes"][0] == {
+        "name": "top",
+        "command": "yazi",
+        "split": None,
+        "direction": None,
+        "percent": None,
+        "focus": False,
+        "git_only": False,
+    }
+    assert u["panes"][2] == {
+        "name": "bottom_right",
+        "command": "lazygit",
+        "split": "bottom_left",
+        "direction": "right",
+        "percent": 65,
+        "focus": False,
+        "git_only": True,
+    }
+
+
+def test_bad_utility_pane_is_a_usage_error(run, tmp_path, capsys):
+    cfg = tmp_path / "bad.toml"
+    cfg.write_text('[[utility.panes]]\nname = "a"\n[[utility.panes]]\nname = "a"\n')
+    assert run("--config", str(cfg), "config", "show") == cli.EXIT_USAGE
+    assert "utility.panes[1] 'a': duplicate name" in capsys.readouterr().err
+
+
 def test_ls_json_lists_plain_nested_folders_when_asked(run, root, tmp_path, capsys):
     (root / "scratch" / "drafts").mkdir()
     cfg = tmp_path / "cfg.toml"
@@ -108,6 +141,36 @@ def test_tools_json_and_install_dry_run(run, capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert [(r["name"], r["action"]) for r in out] == [("yazi", "planned"), ("lazygit", "planned")]
     assert run("tools", "install", "nano") == cli.EXIT_USAGE
+
+
+LIST_LAYOUT = """\
+[[utility.panes]]
+name = "files"
+command = "yazi"
+[[utility.panes]]
+name = "git"
+command = "lazygit"
+split = "files"
+direction = "right"
+percent = 40
+"""
+
+
+def test_tools_names_the_panes_by_their_names(run, tmp_path, capsys, monkeypatch):
+    from corral import tools
+
+    monkeypatch.setattr(tools.shutil, "which", lambda n: None)
+    assert run("tools") == 0
+    assert "runs in the bottom-right pane" in capsys.readouterr().out  # the shorthand's display
+    cfg = tmp_path / "list.toml"
+    cfg.write_text(LIST_LAYOUT)
+    assert run("--config", str(cfg), "tools", "--json") == 0
+    out = {t["name"]: t["panes"] for t in json.loads(capsys.readouterr().out)["tools"]}
+    assert out == {"yazi": ["files"], "lazygit": ["git"]}
+    assert run("--config", str(cfg), "tools") == 0
+    text = capsys.readouterr().out
+    assert "runs in the files pane" in text
+    assert "runs in the git pane" in text
 
 
 def test_reveal_json(run, root, mac, opener, capsys):

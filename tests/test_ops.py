@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import replace
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from corral import ops
-from corral.config import ConfigError
+from corral.config import ConfigError, Pane, Utility
 from corral.herdr import HerdrError
 from corral.ops import open_detached as real_open_detached  # before the autouse fixture
 from tests.fake_herdr import fail
@@ -38,15 +39,154 @@ def test_utility_tab_splits_by_the_configured_sizes(herdr, cfg, root):
     assert splits == [("down", 0.5), ("right", 0.35)]  # shell 35%, lazygit 65%
 
     herdr.calls.clear()
-    sized = replace(cfg, utility=replace(cfg.utility, top_percent=30, bottom_left_percent=70))
+    sized = replace(
+        cfg,
+        utility=Utility.shorthand(
+            top="true", bottom_right="true", top_percent=30, bottom_left_percent=70
+        ),
+    )
     ops.up(herdr, sized, root / "shop", no_agent=True)
     assert [c[2:] for c in herdr.calls if c[0] == "split"] == [("down", 0.3), ("right", 0.7)]
+
+
+def built_utility(herdr, cfg, root, *panes: Pane):
+    """Build `panes` as the utility tab; (split calls, focused pane, panes by
+    name, returned pane)."""
+    herdr.calls.clear()
+    herdr.focused.clear()
+    _, tab, pane = herdr.create_workspace(str(root), "x")
+    lay = replace(cfg, utility=Utility(panes=panes))
+    got = ops.build_utility_tab(herdr, lay, tab, pane, str(root), "x", ops._quiet)
+    ids = [p for p, v in herdr.panes.items() if v["tab"] == tab]
+    by_name = dict(zip([p.name for p in panes], ids, strict=True))
+    splits = [c[1:] for c in herdr.calls if c[0] == "split"]
+    return splits, herdr.focused, by_name, got
+
+
+def test_default_utility_tab_focuses_bottom_left(herdr, cfg, root):
+    splits, focused, ids, got = built_utility(herdr, cfg, root, *Utility().panes)
+    assert splits == [(ids["top"], "down", 0.5), (ids["bottom_left"], "right", 0.35)]
+    assert focused == [ids["bottom_left"]] == [got]
+
+
+def test_utility_grid_splits_in_list_order(herdr, cfg, root):
+    grid = (
+        Pane("top_left", "true"),
+        Pane("bottom_left", "", "top_left", "down", 40),
+        Pane("top_right", "true", "top_left", "right", 70),
+        Pane("bottom_right", "true", "top_right", "down", 50),
+    )
+    splits, focused, ids, got = built_utility(herdr, cfg, root, *grid)
+    assert splits == [
+        (ids["top_left"], "down", 0.6),
+        (ids["top_left"], "right", 0.3),
+        (ids["top_right"], "down", 0.5),
+    ]
+    assert focused == [ids["bottom_left"]] == [got]  # the first plain shell
+    assert [herdr.panes[ids[n]]["ran"] for n in ids] == [["true"], [], ["true"], ["true"]]
+
+
+def test_one_pane_utility_tab_makes_no_split(herdr, cfg, root):
+    splits, _, ids, got = built_utility(herdr, cfg, root, Pane("main", "true"))
+    assert splits == []
+    assert got == ids["main"]
+    assert herdr.panes[got]["ran"] == ["true"]
+
+
+def test_utility_focus_setting_and_first_pane_fallback(herdr, cfg, root):
+    a, b, c = Pane("a"), Pane("b", "true", "a", "right", 50), Pane("c", "", "b", "down", 50)
+    _, focused, ids, got = built_utility(herdr, cfg, root, a, b, replace(c, focus=True))
+    assert focused == [ids["c"]] == [got]
+
+    no_shell = (replace(a, command="true"), b, replace(c, command="true"))
+    _, focused, ids, got = built_utility(herdr, cfg, root, *no_shell)
+    assert got == ids["a"]
+    assert focused == []  # no split takes the focus from the first pane
+
+
+GIT_PANES = (Pane("main"), Pane("git", "lazygit", "main", "right", 50, git_only=True))
+
+
+@pytest.fixture
+def lazygit_installed(monkeypatch):
+    real = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda n, *a, **k: "/bin/lazygit" if n == "lazygit" else real(n, *a, **k)
+    )
+
+
+def git_pane_run(herdr, cfg, cwd: Path, *panes: Pane) -> tuple[list[str], list[str]]:
+    """Build `panes` in `cwd`; (what the last pane ran, the error lines)."""
+    _, tab, pane = herdr.create_workspace(str(cwd), "x")
+    errors = []
+
+    def report(line, error=False):
+        if error:
+            errors.append(line)
+
+    lay = replace(cfg, utility=Utility(panes=panes or GIT_PANES))
+    ops.build_utility_tab(herdr, lay, tab, pane, str(cwd), "x", report)
+    last = [p for p, v in herdr.panes.items() if v["tab"] == tab][-1]
+    return herdr.panes[last]["ran"], errors
+
+
+@pytest.fixture
+def git_repo(tmp_path) -> Path:
+    if not shutil.which("git"):
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    return repo
+
+
+def test_git_only_pane_runs_inside_a_work_tree(herdr, cfg, git_repo, lazygit_installed):
+    assert git_pane_run(herdr, cfg, git_repo) == (["lazygit"], [])
+    assert git_pane_run(herdr, cfg, git_repo / "sub") == (["lazygit"], [])  # inside counts
+
+
+def test_git_only_pane_is_a_shell_outside_one(herdr, cfg, tmp_path, lazygit_installed):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    ran, errors = git_pane_run(herdr, cfg, plain)
+    assert ran == []
+    assert errors == ["  skip   lazygit — not in a git work tree (plain shell instead)"]
+    # The same command in a pane that isn't git-only runs anyway.
+    other = (GIT_PANES[0], replace(GIT_PANES[1], git_only=False))
+    assert git_pane_run(herdr, cfg, plain, *other) == (["lazygit"], [])
+
+
+def test_no_git_on_path_counts_as_outside(herdr, cfg, git_repo, monkeypatch):
+    real = shutil.which
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda n, *a, **k: None if n == "git" else "/bin/lazygit" if n == "lazygit" else real(n),
+    )
+    assert ops.in_git_work_tree(str(git_repo)) is False
+    ran, errors = git_pane_run(herdr, cfg, git_repo)
+    assert ran == []
+    assert "not in a git work tree" in errors[0]
+
+
+def test_git_is_asked_at_most_once_per_build(herdr, cfg, tmp_path, monkeypatch, lazygit_installed):
+    asked = []
+    monkeypatch.setattr(ops, "in_git_work_tree", lambda path: asked.append(path) or True)
+    two = (*GIT_PANES, Pane("more", "lazygit", "git", "down", 50, git_only=True))
+    assert git_pane_run(herdr, cfg, tmp_path, *two) == (["lazygit"], [])
+    assert asked == [str(tmp_path)]
+
+    asked.clear()
+    git_pane_run(herdr, cfg, tmp_path, GIT_PANES[0], replace(GIT_PANES[1], git_only=False))
+    git_pane_run(herdr, cfg, tmp_path, GIT_PANES[0], replace(GIT_PANES[1], command=""))
+    assert asked == []  # no git-only pane with a command
 
 
 def test_missing_utility_program_suggests_installing_it(herdr, cfg, root, monkeypatch):
     real = shutil.which
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: None if n == "lazygit" else real(n))
-    u = replace(cfg.utility, bottom_right="lazygit", top="no-such-program-zz")
+    monkeypatch.setattr(ops, "in_git_work_tree", lambda path: True)  # lazygit is git-only
+    u = Utility.shorthand(top="no-such-program-zz", bottom_right="lazygit")
     lines = []
     ops.up(herdr, replace(cfg, utility=u), root / "courses", no_agent=True,
            report=lambda line, error=False: lines.append(line))  # fmt: skip

@@ -45,7 +45,7 @@ def root(tmp_path: Path) -> Path:
 @pytest.fixture
 def cfg(root: Path) -> Config:
     # Utility commands that certainly exist, so tests don't depend on yazi.
-    return Config(root=root, utility=Utility(top="true", bottom_left="", bottom_right="true"))
+    return Config(root=root, utility=Utility.shorthand(top="true", bottom_right="true"))
 
 
 @pytest.fixture(autouse=True)
