@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.11.0](https://github.com/chocs-cat/corral/compare/v0.10.1...v0.11.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** `corral config show --json` prints `utility` as `{"enabled": …, "panes": [...]}`, with the shorthand expanded and `split`, `direction` and `percent` null on the first pane. The old `top`, `bottom_left`, `bottom_right`, `top_percent` and `bottom_left_percent` keys are no longer in it. Config files that use them keep working.
+
+### Features
+
+* **config:** the utility tab is a list of panes, and lazygit skips folders outside git ([#67](https://github.com/chocs-cat/corral/issues/67)) ([23e0ed9](https://github.com/chocs-cat/corral/commit/23e0ed98863f89c38dab6a76526854ef650dbc58))
+* **tui:** the settings screen picks the utility tab's layout from presets ([33f4b45](https://github.com/chocs-cat/corral/commit/33f4b45ab707877dc139706da00c7ea51c37a166)), closes [#21](https://github.com/chocs-cat/corral/issues/21)
+
+
+### Bug Fixes
+
+* **config:** saving keeps dotted utility and harnesses keys out of the tables it adds ([#74](https://github.com/chocs-cat/corral/issues/74)) ([20250e5](https://github.com/chocs-cat/corral/commit/20250e59486b2b64e067757855d3db8d2b5ba408)), closes [#72](https://github.com/chocs-cat/corral/issues/72)
+* **config:** saving no longer breaks a config that writes [utility], panes or [[models]] as inline tables ([33f4b45](https://github.com/chocs-cat/corral/commit/33f4b45ab707877dc139706da00c7ea51c37a166)), closes [#68](https://github.com/chocs-cat/corral/issues/68)
+
 ## [0.10.1](https://github.com/chocs-cat/corral/compare/v0.10.0...v0.10.1) (2026-10-25)
 
 
