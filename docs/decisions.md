@@ -448,3 +448,23 @@ standard tables (`[utility]`, `[[utility.panes]]`, `[[models]]`), a blank
 line before each header, and the file reloads to the settings saved. An
 inline table stays inline when only its values change, as DEC-6 keeps the
 file's layout. Inline tables hold no comments, so none are lost. (#68)
+
+## DEC-30: Saving rewrites dotted keys it has to restructure (2026-10)
+
+Dotted keys are a third way to write a table: `utility.top = "yazi"`,
+`utility.panes = [{ … }]` or `harnesses.claude.command = "…"` among the
+file's bare keys, on adjacent lines or not. A table added in their place
+lands before the bare keys that follow, which then belong to it. So when a
+save has to add a table under a top-level table the file writes with dotted
+keys (`[[utility.panes]]` in place of the shorthand, a rebuilt
+`utility.panes`, a new `[harnesses.<name>]`), it first rewrites that table
+as a standard one under its own header (`[utility]`, `[harnesses]`), as
+DEC-29 does for an inline table: after the file's bare keys, with a blank
+line before the header. Every dotted line of that table moves into it, keyed
+from the header (`claude.command = …` under `[harnesses]`), and the file
+reloads to the settings saved, every bare key still top-level. A comment on
+a line of its own stays where it was; an end-of-line comment on a moved line
+is dropped, as a removed shorthand key's is. A save that adds no table
+there (a changed value, an added or removed `utility.bottom_left` or
+`utility.enabled`) leaves the dotted keys as they are, as DEC-6 keeps the
+file's layout. (#72)
