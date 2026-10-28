@@ -9,20 +9,33 @@ from textual.worker import WorkerFailed, WorkerState
 from tests.tui_helpers import settle, wait_for
 
 
+def on_wait(monkeypatch, worker, then) -> None:
+    """Call `then` when the worker is first waited on, so a test's race starts
+    from settle's wait rather than from a timer a slow runner can outrun."""
+    wait = worker.wait
+
+    def waited():
+        then()
+        monkeypatch.setattr(worker, "wait", wait)
+        return wait()
+
+    monkeypatch.setattr(worker, "wait", waited)
+
+
 class Superseded(App):
     """Worker `a` is cancelled by `b`, a rerun in its exclusive group."""
 
     def on_mount(self) -> None:
-        self.a = self.run_worker(asyncio.sleep(0.5), group="g", exclusive=True)
-        self.set_timer(0.05, self.rerun)
+        self.a = self.run_worker(asyncio.Event().wait(), group="g", exclusive=True)
 
     def rerun(self) -> None:
         self.b = self.run_worker(asyncio.sleep(0.1), group="g", exclusive=True)
 
 
-async def test_settle_counts_a_superseded_worker_as_settled():
+async def test_settle_counts_a_superseded_worker_as_settled(monkeypatch):
     app = Superseded()
     async with app.run_test() as pilot:
+        on_wait(monkeypatch, app.a, lambda: app.call_later(app.rerun))
         await settle(pilot, app, seconds=0)
         assert app.a.state == WorkerState.CANCELLED
         assert app.b.state == WorkerState.SUCCESS
@@ -30,16 +43,18 @@ async def test_settle_counts_a_superseded_worker_as_settled():
 
 class Failing(App):
     def on_mount(self) -> None:
-        self.run_worker(self.boom(), exit_on_error=False)
+        self.go = asyncio.Event()
+        self.worker = self.run_worker(self.boom(), exit_on_error=False)
 
     async def boom(self) -> None:
-        await asyncio.sleep(0.1)
+        await self.go.wait()
         raise RuntimeError("boom")
 
 
-async def test_settle_raises_for_a_failed_worker():
+async def test_settle_raises_for_a_failed_worker(monkeypatch):
     app = Failing()
     async with app.run_test() as pilot:
+        on_wait(monkeypatch, app.worker, app.go.set)
         with pytest.raises(WorkerFailed):
             await settle(pilot, app, seconds=0)
 
