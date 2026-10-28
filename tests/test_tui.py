@@ -5,14 +5,9 @@ from textual.widgets._header import HeaderTitle
 
 from corral import ops
 from corral.tui.app import AgentPicker, Confirm, CorralApp, FixedHeader
+from tests.tui_helpers import settle
 
 B = "•"
-
-
-async def settle(pilot, app, seconds=0.3):
-    await pilot.pause(seconds)
-    await app.workers.wait_for_complete()
-    await pilot.pause(0.1)
 
 
 def rows(app):
