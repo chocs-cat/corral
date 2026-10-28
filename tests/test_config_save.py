@@ -569,3 +569,29 @@ def test_removed_dotted_lines_leave_no_extra_blank_lines(tmp_path, monkeypatch, 
     out = save_text(tmp_path, text, add_pane)
     assert out.startswith(head + "[[utility.panes]]\n")
     assert "\n\n\n" not in out
+
+
+DOTTED_HARNESS = 'root = "~/Code"\nharnesses.claude.command = "claude --y"\nscan_depth = 2\n'
+
+
+def test_a_dotted_harnesses_becomes_a_table_when_a_harness_is_added(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def codex(c: config.Config) -> None:
+        c.harnesses["codex"] = config.HarnessSettings("codex --up")
+
+    text = save_text(tmp_path, DOTTED_HARNESS, codex)
+    assert text.startswith('root = "~/Code"\nscan_depth = 2\n\n[harnesses]\n')
+    assert '[harnesses]\nclaude.command = "claude --y"\n\n[harnesses.codex]\n' in text
+    assert "harnesses." not in text.replace("[harnesses.codex]", "")
+    assert tomllib.loads(text)["scan_depth"] == 2
+
+
+def test_a_changed_dotted_harness_command_stays_dotted(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def claude(c: config.Config) -> None:
+        c.harnesses["claude"] = config.HarnessSettings("claude upgrade")
+
+    text = save_text(tmp_path, DOTTED_HARNESS, claude)
+    assert text == DOTTED_HARNESS.replace("claude --y", "claude upgrade")

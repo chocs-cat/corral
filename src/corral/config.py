@@ -808,6 +808,14 @@ def _put_table(table, value: dict, default: dict) -> None:
             table[k] = v
 
 
+def _adds_table(table, value: dict, default: dict) -> bool:
+    """Whether _put_table(table, value, default) would add a sub-table."""
+    return any(
+        isinstance(v, dict) and not isinstance(table.get(k), dict) and _new_table({k: v}, default)
+        for k, v in value.items()
+    )
+
+
 def _standard(table):
     """A standard table holding an inline table's keys and values (DEC-29);
     any other table as it is."""
@@ -999,7 +1007,12 @@ def save(cfg: Config, path: Path) -> None:
         elif key == "utility":
             _put_utility(doc, cfg.utility)
         elif isinstance(value, dict) and isinstance(doc.get(key), dict):
-            _put_table(doc[key], value, defaults.get(key, {}))
+            default = defaults.get(key, {})
+            if _dotted(doc, key) and _adds_table(doc[key], value, default):
+                # [harnesses.<name>] after dotted keys would take the bare
+                # keys that follow them (DEC-30).
+                _to_header(doc, key)
+            _put_table(doc[key], value, default)
         elif isinstance(value, dict):
             doc[key] = _new_table(value, defaults.get(key, {}))
         elif _plain(doc.get(key)) != value:
