@@ -30,12 +30,12 @@ import shlex
 import shutil
 import subprocess
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
-from tomlkit.items import Whitespace
+from tomlkit.items import InlineTable, Null, Whitespace
 
 EFFORT = "{effort}"
 
@@ -377,6 +377,77 @@ class Utility:
             or next((p for p in self.panes if not p.command), None)
             or self.panes[0]
         )
+
+
+@dataclass(frozen=True)
+class Preset:
+    """A utility-tab shape the settings screen offers (DEC-28)."""
+
+    key: str
+    title: str
+    panes: tuple[Pane, ...]
+
+
+PRESETS = (
+    Preset("one", "One pane", (Pane("main"),)),
+    Preset("side", "Side by side", (Pane("left"), Pane("right", "", "left", "right", 50))),
+    Preset("stacked", "Stacked", (Pane("top"), Pane("bottom", "", "top", "down", 50))),
+    Preset(
+        "top_two",
+        "Top and two below",
+        (
+            Pane("top"),
+            Pane("bottom_left", "", "top", "down", 50, focus=True),
+            Pane("bottom_right", "", "bottom_left", "right", 50),
+        ),
+    ),
+    Preset(
+        "left_two",
+        "Left and two on the right",
+        (
+            Pane("left"),
+            Pane("top_right", "", "left", "right", 50),
+            Pane("bottom_right", "", "top_right", "down", 50),
+        ),
+    ),
+    Preset(
+        "grid",
+        "Grid of four",
+        (
+            Pane("top_left"),
+            Pane("bottom_left", "", "top_left", "down", 50),
+            Pane("top_right", "", "top_left", "right", 50),
+            Pane("bottom_right", "", "bottom_left", "right", 50),
+        ),
+    ),
+)
+
+
+def preset_of(panes: tuple[Pane, ...]) -> Preset | None:
+    """The preset whose shape this is (DEC-28): the same names in order,
+    each splitting the same pane the same way. Commands, sizes, focus and
+    git_only don't count."""
+
+    def shape(ps):
+        return [(p.name, p.split, p.direction) for p in ps]
+
+    return next((pr for pr in PRESETS if shape(pr.panes) == shape(panes)), None)
+
+
+def reshape(current: tuple[Pane, ...], target: tuple[Pane, ...]) -> tuple[Pane, ...]:
+    """`target`'s shape (names, splits, directions, focus) with each
+    position's command, git_only and size taken from `current` (DEC-28).
+    Positions past `current` keep `target`'s own; the first pane has no
+    size."""
+    out = []
+    for i, t in enumerate(target):
+        if i < len(current):
+            c = current[i]
+            t = replace(t, command=c.command, git_only=c.git_only)
+            if i > 0 and c.percent is not None:
+                t = replace(t, percent=c.percent)
+        out.append(t)
+    return tuple(out)
 
 
 @dataclass
@@ -737,21 +808,63 @@ def _put_table(table, value: dict, default: dict) -> None:
             table[k] = v
 
 
+def _standard(table):
+    """A standard table holding an inline table's keys and values (DEC-29);
+    any other table as it is."""
+    if not isinstance(table, InlineTable):
+        return table
+    out = tomlkit.table(is_super_table=False)  # keep its [header] with no keys of its own
+    for k, v in table.items():
+        out[k] = _plain(v)  # an inline item's formatting doesn't fit a table's lines
+    return out
+
+
+def _to_header(doc, key: str):
+    """Replace the inline table `doc[key]` with a standard one under its own
+    [header] (DEC-29), one blank line before it. tomlkit moves it after the
+    file's bare keys; the blank lines that followed the inline key go with
+    it, and those left before the header fold into one."""
+    body = doc.body
+    old = next(n for n, (k, _) in enumerate(body) if k is not None and k.key == key)
+    n = old + 1
+    while n < len(body) and isinstance(body[n][1], (Whitespace, Null)):
+        body[n] = (None, Null())
+        n += 1
+    table = doc[key] = _standard(doc[key])
+    i = next(n for n, (k, _) in enumerate(body) if k is not None and k.key == key)
+    start = i
+    while start > 0 and isinstance(body[start - 1][1], (Whitespace, Null)):
+        start -= 1
+    blanks = [n for n in range(start, i) if isinstance(body[n][1], Whitespace)]
+    for n in blanks[1:]:
+        body[n] = (None, Null())
+    if blanks:
+        body[blanks[0]] = (None, Whitespace("\n"))
+    table.trivia.indent = "\n" if start > 0 and not blanks else ""
+    return table
+
+
+def _same_ids(old, items: list[dict], id_key: str) -> bool:
+    tables = list(old) if isinstance(old, list) else []
+    return [str(t.get(id_key)) for t in tables] == [m[id_key] for m in items]
+
+
 def _put_tables(parent, key: str, items: list[dict], id_key: str, default: dict) -> None:
     """Update an array of tables ([[models]], [[utility.panes]]): in place
     while the ids (`id_key`) and their order are unchanged; otherwise
     rebuild it in the new order, reusing each surviving table (and the
-    comments in it), one blank line apart."""
+    comments in it), one blank line apart. A rebuilt inline array of
+    inline tables becomes standard tables (DEC-29)."""
     old = parent.get(key)
     tables = list(old) if isinstance(old, list) else []
-    if [str(t.get(id_key)) for t in tables] == [m[id_key] for m in items]:
+    if _same_ids(old, items, id_key):
         for t, m in zip(tables, items, strict=True):
             _put_table(t, m, default)
         return
     by_id = {str(t.get(id_key)): t for t in tables}
     aot = tomlkit.aot()
     for m in items:
-        t = by_id.get(m[id_key]) or tomlkit.table()
+        t = _standard(by_id.get(m[id_key])) or tomlkit.table()
         _put_table(t, m, default)
         body = t.value.body
         while body and body[-1][0] is None and isinstance(body[-1][1], Whitespace):
@@ -793,13 +906,19 @@ def _put_utility(doc, u: Utility) -> None:
         same = False
     if same:
         return
+    panes = [_pane_data(p) for p in u.panes]
+    if isinstance(table, InlineTable) and not (
+        "panes" in table and _same_ids(table["panes"], panes, "name")
+    ):
+        # An inline table can't hold [[utility.panes]] (DEC-29).
+        table = _to_header(doc, "utility")
     # Blank lines and comments at the table's end lead into what follows it:
     # keep them after the panes when the panes are new here.
     body = table.value.body
     trailing = []
     while "panes" not in table and body and body[-1][0] is None:
         trailing.insert(0, body.pop())
-    _put_tables(table, "panes", [_pane_data(p) for p in u.panes], "name", PANE_DEFAULTS)
+    _put_tables(table, "panes", panes, "name", PANE_DEFAULTS)
     table["panes"][-1].value.body.extend(trailing)
 
 

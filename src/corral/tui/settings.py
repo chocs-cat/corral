@@ -39,18 +39,30 @@ from corral.config import (
     DEFAULT_PRUNE,
     PERCENT_MAX,
     PERCENT_MIN,
+    PRESETS,
     Config,
     ConfigError,
     HarnessSettings,
     ModelSpec,
+    Pane,
     Utility,
+    preset_of,
+    reshape,
 )
 from corral.herdr import AGENT_KINDS
 from corral.tui.dialogs import AgentPicker, Confirm
 from corral.tui.upgrades import harness_status
 
-UTILITY_PANES = (("top", "Top"), ("bottom_left", "Bottom left"), ("bottom_right", "Bottom right"))
-UTILITY_SIZES = (("top_percent", "Top height"), ("bottom_left_percent", "Bottom-left width"))
+PRESET = {p.key: p for p in PRESETS}
+CUSTOM = "custom"  # the #util-shape value for a file layout that is no preset (DEC-28)
+PRESET_NOTE = (
+    "The first tab of every workspace. Pick a layout, then give each pane a command, or "
+    "leave it empty for a plain shell. A git-only pane opens a plain shell outside a git repo."
+)
+CUSTOM_NOTE = (
+    "This layout comes from the config file: change its shape there. Its commands, sizes "
+    "and git-only switches can be edited here."
+)
 
 
 def _split_list(text: str) -> list[str]:
@@ -99,30 +111,59 @@ def command_status(cmd: str) -> Text:
     )
 
 
-def utility_diagram(
-    names: tuple[str, str, str], top_percent: int, left_percent: int, w: int = 44, h: int = 6
-) -> str:
-    """The utility tab's panes, drawn roughly to scale."""
-    top, left, right = names
-    th = min(h - 1, max(1, round(h * top_percent / 100)))
-    lw = min(w - 2, max(1, round((w - 1) * left_percent / 100)))
-    rw = w - 1 - lw
-    top_text = f"{top} {top_percent}%"
-    left_text = f"{left} {left_percent}%"
-    right_text = f"{right} {100 - left_percent}%"
+# A border cell's character from the sides it joins: up, down, left, right.
+BOX = {
+    frozenset("lr"): "─",
+    frozenset("ud"): "│",
+    frozenset("dr"): "┌",
+    frozenset("dl"): "┐",
+    frozenset("ur"): "└",
+    frozenset("ul"): "┘",
+    frozenset("udr"): "├",
+    frozenset("udl"): "┤",
+    frozenset("dlr"): "┬",
+    frozenset("ulr"): "┴",
+    frozenset("udlr"): "┼",
+}
 
-    def cell(text: str, width: int, show: bool) -> str:
-        return (text[:width] if show else "").center(width)
 
-    lines: list[str] = ["┌" + "─" * w + "┐"]
-    lines += [f"│{cell(top_text, w, i == (th - 1) // 2)}│" for i in range(th)]
-    lines.append("├" + "─" * lw + "┬" + "─" * rw + "┤")
-    bh = h - th
-    for i in range(bh):
-        mid = i == (bh - 1) // 2
-        lines.append(f"│{cell(left_text, lw, mid)}│{cell(right_text, rw, mid)}│")
-    lines.append("└" + "─" * lw + "┴" + "─" * rw + "┘")
-    return "\n".join(lines)
+def layout_diagram(panes: tuple[Pane, ...], w: int = 44, h: int = 10) -> str | None:
+    """The utility tab's panes drawn to scale, each labelled with its name
+    and program (DEC-28 "The diagram"); None when a pane would have no
+    room inside its border at this size."""
+    rects = {panes[0].name: (0, 0, w + 1, h + 1)}  # border columns and rows, inclusive
+    for p in panes[1:]:
+        x0, y0, x1, y1 = rects[p.split or ""]
+        keep = (100 - (p.percent or 50)) / 100  # the split pane's share
+        if p.direction == "right":
+            c = x0 + round((x1 - x0) * keep)
+            if c - x0 < 2 or x1 - c < 2:
+                return None
+            rects[p.split or ""], rects[p.name] = (x0, y0, c, y1), (c, y0, x1, y1)
+        else:
+            r = y0 + round((y1 - y0) * keep)
+            if r - y0 < 2 or y1 - r < 2:
+                return None
+            rects[p.split or ""], rects[p.name] = (x0, y0, x1, r), (x0, r, x1, y1)
+    joins = [[set() for _ in range(w + 2)] for _ in range(h + 2)]
+    for x0, y0, x1, y1 in rects.values():
+        for x in range(x0, x1):
+            for y in (y0, y1):
+                joins[y][x].add("r")
+                joins[y][x + 1].add("l")
+        for y in range(y0, y1):
+            for x in (x0, x1):
+                joins[y][x].add("d")
+                joins[y + 1][x].add("u")
+    grid = [[BOX.get(frozenset(j), " ") for j in row] for row in joins]
+    for p in panes:
+        x0, y0, x1, y1 = rects[p.name]
+        width, height = x1 - x0 - 1, y1 - y0 - 1
+        label = [p.name, tools.program(p.command) or "shell"][: 1 if height == 1 else 2]
+        top = y0 + 1 + (height - len(label)) // 2
+        for k, text in enumerate(label):
+            grid[top + k][x0 + 1 : x1] = text[:width].center(width)
+    return "\n".join("".join(row) for row in grid)
 
 
 def tool_status(name: str) -> Text:
@@ -413,6 +454,9 @@ class SettingsScreen(Screen[Config | None]):
     SettingsScreen .buttons { height: auto; margin-top: 1; }
     SettingsScreen .buttons > Button { margin-right: 1; }
     SettingsScreen #util-diagram { margin-left: 18; margin-top: 1; color: $text-muted; }
+    SettingsScreen #util-panes { height: auto; }
+    SettingsScreen #util-shape { width: 40; }
+    SettingsScreen .row > Switch.git { margin-left: 1; }
     SettingsScreen TabPane { overflow-y: auto; }
     SettingsScreen .row > Input.percent { width: 8; }
     SettingsScreen .row > Label.unit { padding: 1 3 0 1; }
@@ -442,9 +486,13 @@ class SettingsScreen(Screen[Config | None]):
         self.hidden: set[str] = set(self.orig.hide_models)
         self.default_agents: list[str] = list(self.orig.default_agents)
         self.prune_extra_only = self.orig.prune >= DEFAULT_PRUNE
-        # The five inputs edit the shorthand's layout; any other layout is
-        # edited in the file for now (DEC-27).
-        self.shorthand = self.orig.utility.as_shorthand()
+        # The Utility tab edits the layout by position: one row per pane of
+        # self.util_layout, whose shape is a preset's or, for Custom, the file's
+        # (DEC-27, DEC-28).
+        self.file_panes: tuple[Pane, ...] = self.orig.utility.panes
+        self.util_layout: tuple[Pane, ...] = self.file_panes
+        matched = preset_of(self.file_panes)
+        self.shape: str = matched.key if matched else CUSTOM
         self.harness_info: dict[str, harnesses.HarnessStatus] = {}  # check_harnesses fills it
 
     # layout
@@ -508,43 +556,17 @@ class SettingsScreen(Screen[Config | None]):
                     "seconds to wait for a new agent to be ready (max 300)", classes="hint"
                 )
             with TabPane("Utility tab", id="tab-utility"):
-                sh = self.shorthand or {}
-                yield Static(
-                    "The first tab of every workspace: one pane on top, two below. Give each "
-                    "pane a command to run, or leave it empty for a plain shell."
-                    if self.shorthand is not None
-                    else "This file's utility layout isn't one pane on top and two below; "
-                    "change it in the config file.",
-                    classes="note",
-                    id="util-note",
-                )
+                yield Static(self.util_note(), classes="note", id="util-note")
                 with Horizontal(classes="row"):
                     yield Label("Utility tab", classes="field")
                     yield Switch(c.utility.enabled, id="util-enabled")
-                for key, title in UTILITY_PANES:
-                    with Horizontal(classes="row"):
-                        yield Label(title, classes="field")
-                        yield Input(
-                            sh.get(key, ""),
-                            placeholder="(plain shell)",
-                            id=f"util-{key}",
-                        )
-                    yield Static(id=f"util-{key}-status", classes="status")
                 with Horizontal(classes="row"):
-                    yield Label("Sizes", classes="field")
-                    for key, title in UTILITY_SIZES:
-                        yield Input(
-                            str(sh.get(key, "")),
-                            type="integer",
-                            id=f"util-{key}",
-                            classes="percent",
-                        )
-                        yield Label(f"% {title.lower()}", classes="unit")
-                yield Static(
-                    "the top pane's share of the tab's height, and the bottom-left pane's "
-                    "share of the row below it",
-                    classes="hint",
-                )
+                    yield Label("Layout", classes="field")
+                    yield Select(
+                        self.shape_options(), value=self.shape, allow_blank=False, id="util-shape"
+                    )
+                with Vertical(id="util-panes"):
+                    yield from self.pane_rows()
                 yield Static(id="util-diagram")
                 yield Static("Tools corral can install", classes="section")
                 yield Static(
@@ -657,8 +679,6 @@ class SettingsScreen(Screen[Config | None]):
         )
         self.render_models()
         self.render_agents()
-        for key, _ in UTILITY_PANES:
-            self.update_util_status(key)
         self.update_tools()
         self.check_harnesses()
         self.util_toggled()
@@ -785,64 +805,126 @@ class SettingsScreen(Screen[Config | None]):
 
     # utility
 
-    @on(Input.Changed, "#util-top")
-    @on(Input.Changed, "#util-bottom_left")
-    @on(Input.Changed, "#util-bottom_right")
+    def util_note(self) -> str:
+        return CUSTOM_NOTE if self.shape == CUSTOM else PRESET_NOTE
+
+    def shape_options(self) -> list[tuple[str, str]]:
+        """The presets, and Custom when the file's layout is none of them."""
+        options = [(p.title, p.key) for p in PRESETS]
+        if preset_of(self.file_panes) is None:
+            options.append(("Custom (from the file)", CUSTOM))
+        return options
+
+    def pane_rows(self) -> list[Horizontal | Static]:
+        """One block per pane of self.util_layout, its widgets numbered by
+        position. Names come from the file: Text, not markup."""
+        rows: list[Horizontal | Static] = []
+        for i, p in enumerate(self.util_layout):
+            rows.append(
+                Horizontal(
+                    Label(Text(p.name), classes="field"),
+                    Input(
+                        p.command,
+                        placeholder="(plain shell)",
+                        id=f"util-cmd-{i}",
+                        classes="util-cmd",
+                    ),
+                    Switch(p.git_only, id=f"util-git-{i}", classes="git"),
+                    Label("git only", classes="unit"),
+                    classes="row",
+                )
+            )
+            rows.append(Static(id=f"util-status-{i}", classes="status"))
+            if i > 0:
+                side = "width" if p.direction == "right" else "height"
+                rows.append(
+                    Horizontal(
+                        Label("", classes="field"),
+                        Input(
+                            str(p.percent),
+                            type="integer",
+                            id=f"util-pct-{i}",
+                            classes="percent util-pct",
+                        ),
+                        Label(Text(f"% of {p.split}'s {side}"), classes="unit"),
+                        classes="row",
+                    )
+                )
+        return rows
+
+    def read_panes(self) -> tuple[Pane, ...]:
+        """self.util_layout with the rows' commands, switches and sizes; a size
+        that isn't a whole number from 10 to 90 keeps the layout's."""
+        out = []
+        for i, p in enumerate(self.util_layout):
+            p = replace(
+                p,
+                command=self.query_one(f"#util-cmd-{i}", Input).value,
+                git_only=self.query_one(f"#util-git-{i}", Switch).value,
+            )
+            if i > 0:
+                p = replace(p, percent=self.util_percent(i) or p.percent)
+            out.append(p)
+        return tuple(out)
+
+    @on(Select.Changed, "#util-shape")
+    async def shape_changed(self, event: Select.Changed) -> None:
+        """Switch shape, keeping commands, sizes and switches by position
+        (DEC-28). Setting the current shape again does nothing."""
+        key = str(event.value)
+        if key == self.shape:
+            return
+        target = self.file_panes if key == CUSTOM else PRESET[key].panes
+        self.util_layout = reshape(self.read_panes(), target)
+        self.shape = key
+        rows = self.query_one("#util-panes", Vertical)
+        await rows.remove_children()
+        await rows.mount_all(self.pane_rows())
+        self.query_one("#util-note", Static).update(self.util_note())
+        self.util_toggled()
+
+    @on(Input.Changed, ".util-cmd")
     def util_changed(self, event: Input.Changed) -> None:
-        self.update_util_status(event.input.id.removeprefix("util-"))
+        self.update_util_status(int((event.input.id or "").rpartition("-")[2]))
         self.update_util_diagram()
 
-    @on(Input.Changed, "#util-top_percent")
-    @on(Input.Changed, "#util-bottom_left_percent")
+    @on(Input.Changed, ".util-pct")
+    @on(Switch.Changed, ".git")
     def util_size_changed(self) -> None:
         self.update_util_diagram()
 
     @on(Switch.Changed, "#util-enabled")
     def util_toggled(self) -> None:
         on_ = self.query_one("#util-enabled", Switch).value
-        for key, _ in UTILITY_PANES + UTILITY_SIZES:
-            self.query_one(f"#util-{key}", Input).disabled = not on_ or self.shorthand is None
+        self.query_one("#util-shape", Select).disabled = not on_
+        for w in self.query("#util-panes Input, #util-panes Switch"):
+            w.disabled = not on_
+        for i in range(len(self.util_layout)):
+            self.update_util_status(i)
         self.update_util_diagram()
 
-    def util_percent(self, key: str) -> int | None:
-        """A size input's value, or None if it isn't a whole number in range."""
+    def util_percent(self, i: int) -> int | None:
+        """Pane i's size, or None if it isn't a whole number in range."""
         try:
-            v = int(self.query_one(f"#util-{key}", Input).value)
+            v = int(self.query_one(f"#util-pct-{i}", Input).value)
         except ValueError:
             return None
         return v if PERCENT_MIN <= v <= PERCENT_MAX else None
 
-    def update_util_status(self, key: str) -> None:
-        if self.shorthand is None:
-            return
-        cmd = self.query_one(f"#util-{key}", Input).value
-        self.query_one(f"#util-{key}-status", Static).update(command_status(cmd))
+    def update_util_status(self, i: int) -> None:
+        cmd = self.query_one(f"#util-cmd-{i}", Input).value
+        self.query_one(f"#util-status-{i}", Static).update(command_status(cmd))
 
     def update_util_diagram(self) -> None:
         diagram = self.query_one("#util-diagram", Static)
         if not self.query_one("#util-enabled", Switch).value:
             diagram.update("no utility tab: a workspace starts with its agent tabs")
             return
-        if self.shorthand is None:
-            # Names and commands come from the file: Text, not markup.
-            diagram.update(
-                Text(
-                    "\n".join(f"{p.name}: {p.command or 'shell'}" for p in self.orig.utility.panes)
-                )
-            )
-            return
-        top, left, right = (
-            tools.program(self.query_one(f"#util-{k}", Input).value) or "shell"
-            for k, _ in UTILITY_PANES
-        )
-        sh = self.shorthand
-        diagram.update(
-            utility_diagram(
-                (top, left, right),
-                self.util_percent("top_percent") or sh["top_percent"],
-                self.util_percent("bottom_left_percent") or sh["bottom_left_percent"],
-            )
-        )
+        # Names and commands come from the file: Text, not markup.
+        panes = self.read_panes()
+        drawn = layout_diagram(panes)
+        listed = "\n".join(f"{p.name}: {p.command or 'shell'}" for p in panes)
+        diagram.update(Text(drawn or listed))
 
     def update_tools(self) -> None:
         for tool in tools.TOOLS:
@@ -871,8 +953,8 @@ class SettingsScreen(Screen[Config | None]):
             return
         res = await self.run_install(name)
         self.update_tools()
-        for key, _ in UTILITY_PANES:
-            self.update_util_status(key)
+        for i in range(len(self.util_layout)):
+            self.update_util_status(i)
         if res.action == "installed":
             self.notify(f"{name} installed: {config.tilde(Path(res.path or ''))}")
         elif res.action != "have":
@@ -1120,21 +1202,21 @@ class SettingsScreen(Screen[Config | None]):
         if not 0.5 <= refresh <= 3600:
             raise ConfigError("refresh interval: use 0.5 to 3600 seconds")
         enabled = self.query_one("#util-enabled", Switch).value
-        if self.shorthand is None:  # a layout only the file edits
-            utility = replace(self.orig.utility, enabled=enabled)
-        else:
-            sizes: dict[str, int] = {}
-            for key, title in UTILITY_SIZES:
-                sizes[key] = number(f"util-{key}", title.lower(), int)
-                if not PERCENT_MIN <= sizes[key] <= PERCENT_MAX:
-                    raise ConfigError(f"{title.lower()}: use {PERCENT_MIN} to {PERCENT_MAX}%")
-            utility = Utility.shorthand(
-                enabled,
-                top=self.query_one("#util-top", Input).value.strip(),
-                bottom_left=self.query_one("#util-bottom_left", Input).value.strip(),
-                bottom_right=self.query_one("#util-bottom_right", Input).value.strip(),
-                **sizes,
+        panes = []
+        for i, p in enumerate(self.util_layout):
+            if i > 0:
+                size = self.util_percent(i)
+                if size is None:  # checked whatever the switch, as the other numbers are
+                    raise ConfigError(f"{p.name} size: use {PERCENT_MIN} to {PERCENT_MAX}%")
+                p = replace(p, percent=size)
+            panes.append(
+                replace(
+                    p,
+                    command=self.query_one(f"#util-cmd-{i}", Input).value.strip(),
+                    git_only=self.query_one(f"#util-git-{i}", Switch).value,
+                )
             )
+        utility = Utility(enabled, tuple(panes))
         return replace(
             self.orig,
             root=Path(root_text).expanduser(),

@@ -262,3 +262,174 @@ def test_the_template_is_the_default_layout_as_a_list():
     assert config.from_dict(tomllib.loads(config.DEFAULT_TOML)).utility == config.Utility()
     assert "[[utility.panes]]" in config.DEFAULT_TOML
     assert not set(config.SHORTHAND_KEYS) & set(tomllib.loads(config.DEFAULT_TOML)["utility"])
+
+
+# --- inline tables a save has to restructure (DEC-29, #68) -------------------
+
+
+def save_inline(tmp_path, text: str, change) -> str:
+    """Write `text`, load it, apply `change`, save; the result must parse and
+    reload to the settings saved."""
+    f = tmp_path / "c.toml"
+    f.write_text(text)
+    c = config.load_file(f)
+    change(c)
+    config.save(c, f)
+    out = f.read_text()
+    tomllib.loads(out)
+    assert config.to_data(config.load_file(f)) == config.to_data(c)
+    return out
+
+
+INLINE_UTILITY = """\
+root = "~/Code"
+utility = { top = "yazi" }
+scan_depth = 3
+# the upgrade command
+[harnesses.claude]
+command = "claude update"
+"""
+
+
+def add_pane(c: config.Config) -> None:
+    extra = config.Pane("more", "htop", "top", "right", 30)
+    c.utility = replace(c.utility, panes=(*c.utility.panes, extra))
+
+
+def test_an_inline_utility_becomes_a_table_when_panes_are_added(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = save_inline(tmp_path, INLINE_UTILITY, add_pane)
+    assert "utility = {" not in text
+    assert "\n\n[utility]\n[[utility.panes]]\n" in text
+    assert text.count("[[utility.panes]]") == 4
+    assert not set(config.SHORTHAND_KEYS) & set(tomllib.loads(text)["utility"])
+    assert text.index("scan_depth = 3") < text.index("[utility]")  # still top-level
+    assert "# the upgrade command" in text
+    assert '[harnesses.claude]\ncommand = "claude update"' in text
+
+
+INLINE_PANES = (
+    'root = "~/Code"\n'
+    "\n"
+    "[utility]\n"
+    'panes = [{ name = "files", command = "yazi" }, '
+    '{ name = "shell", split = "files", direction = "right", percent = 40 }]\n'
+)
+
+
+def swap_panes(c: config.Config) -> None:
+    files, shell = c.utility.panes
+    c.utility = replace(
+        c.utility,
+        panes=(
+            replace(shell, split=None, direction=None, percent=None),
+            replace(files, split="shell", direction="down", percent=60),
+        ),
+    )
+
+
+def test_inline_panes_become_tables_when_reordered(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = save_inline(tmp_path, INLINE_PANES, swap_panes)
+    assert "panes = [" not in text
+    assert text.count("[[utility.panes]]") == 2
+    assert text.index('name = "shell"') < text.index('name = "files"')
+
+
+def test_inline_panes_become_tables_when_a_pane_is_added(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def add(c: config.Config) -> None:
+        extra = config.Pane("log", "tail -f x", "shell", "down", 30)
+        c.utility = replace(c.utility, panes=(*c.utility.panes, extra))
+
+    text = save_inline(tmp_path, INLINE_PANES, add)
+    assert "panes = [" not in text
+    assert text.count("[[utility.panes]]") == 3
+
+
+def test_inline_panes_become_tables_when_a_pane_is_removed(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def remove(c: config.Config) -> None:
+        c.utility = replace(c.utility, panes=c.utility.panes[:1])
+
+    text = save_inline(tmp_path, INLINE_PANES, remove)
+    assert "panes = [" not in text
+    assert text.count("[[utility.panes]]") == 1
+    assert "shell" not in text
+
+
+def test_an_inline_utility_with_inline_panes_becomes_tables(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = INLINE_PANES.replace("\n[utility]\npanes = [", "utility = { panes = [").replace(
+        "40 }]\n", "40 }] }\n"
+    )
+    assert "utility = { panes = [{" in text
+    text = save_inline(tmp_path, text, swap_panes)
+    assert "utility = {" not in text
+    assert "panes = [" not in text
+    assert 'root = "~/Code"\n\n[utility]\n' in text
+    assert text.count("[[utility.panes]]") == 2
+
+
+INLINE_MODELS = (
+    'root = "~/Code"\n'
+    'models = [{ key = "gem", tool = "gemini", display = "Gemini", args = ["--x"] }, '
+    '{ key = "big", tool = "claude", display = "Big", args = [] }]\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("change", "keys"),
+    [
+        (
+            lambda ms: (*ms, ModelSpec("mini", "codex", "Mini", ("-m", "mini"))),
+            ["gem", "big", "mini"],
+        ),
+        (lambda ms: ms[:1], ["gem"]),
+        (lambda ms: ms[::-1], ["big", "gem"]),
+    ],
+    ids=["added", "removed", "reordered"],
+)
+def test_inline_models_become_tables(tmp_path, monkeypatch, change, keys):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def edit(c: config.Config) -> None:
+        c.custom_models = change(c.custom_models)
+
+    text = save_inline(tmp_path, INLINE_MODELS, edit)
+    assert "models = [" not in text
+    assert text.count("[[models]]") == len(keys)
+    assert [m["key"] for m in tomllib.loads(text)["models"]] == keys
+    assert "\n\n[[models]]" in text  # one blank line before each
+    assert "\n\n\n" not in text
+    assert text.startswith('root = "~/Code"\n')
+
+
+def test_value_only_edits_keep_inline_tables_inline(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def command(c: config.Config) -> None:
+        files, shell = c.utility.panes
+        c.utility = replace(c.utility, panes=(replace(files, command="nnn"), shell))
+
+    text = save_inline(tmp_path, INLINE_PANES, command)
+    assert "panes = [{" in text
+    assert "[[" not in text
+    assert 'command = "nnn"' in text
+
+    def display(c: config.Config) -> None:
+        gem, big = c.custom_models
+        c.custom_models = (replace(gem, display="Gem"), big)
+
+    text = save_inline(tmp_path, INLINE_MODELS, display)
+    assert "models = [{" in text
+    assert "[[" not in text
+    assert 'display = "Gem"' in text
+
+    def top(c: config.Config) -> None:
+        c.utility = config.Utility.shorthand(top="htop")
+
+    text = save_inline(tmp_path, INLINE_UTILITY, top)
+    assert text == INLINE_UTILITY.replace('{ top = "yazi" }', '{ top = "htop" }')

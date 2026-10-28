@@ -6,11 +6,27 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button, DataTable, Input, OptionList, Switch, TabbedContent
+import tomlkit
+from textual.widgets import (
+    Button,
+    DataTable,
+    Input,
+    OptionList,
+    Select,
+    Switch,
+    TabbedContent,
+)
 
 from corral import config, harnesses, ops, tools
+from corral.config import PRESETS, Utility, reshape
 from corral.tui.app import AgentPicker, Confirm, CorralApp
-from corral.tui.settings import FolderPicker, ModelEditor, SettingsScreen, command_status
+from corral.tui.settings import (
+    FolderPicker,
+    ModelEditor,
+    SettingsScreen,
+    command_status,
+    layout_diagram,
+)
 from corral.tui.upgrades import UpgradeScreen
 
 B = "•"
@@ -60,7 +76,7 @@ async def test_save_applies_root_and_utility(app, cfg_path, tmp_path):
         s = await open_settings(pilot, app)
         s.query_one("#root", Input).value = str(other)
         await show_tab(pilot, s, "tab-utility")
-        s.query_one("#util-top", Input).value = "htop"
+        s.query_one("#util-cmd-0", Input).value = "htop"
         await settle(pilot, app, 0.5)
         assert "1 project" in str(s.query_one("#root-status").render())
         await pilot.press("ctrl+s")
@@ -127,30 +143,186 @@ git_only = false
 """
 
 
-async def test_a_layout_the_inputs_cant_say_is_shown_and_kept(herdr, cfg_path, monkeypatch):
+def settings_app(herdr, path: Path, text: str, monkeypatch) -> CorralApp:
     monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    path.write_text(text)
+    return CorralApp(config.load(path), herdr, config_path=path)
+
+
+def rows(s: SettingsScreen) -> list[tuple[str, str, bool, str | None]]:
+    """Each pane row: (name, command, git only, size)."""
+    out = []
+    names = [str(w.render()) for w in s.query("#util-panes Label.field") if str(w.render())]
+    for i, name in enumerate(names):
+        pct = s.query(f"#util-pct-{i}")
+        out.append(
+            (
+                name,
+                s.query_one(f"#util-cmd-{i}", Input).value,
+                s.query_one(f"#util-git-{i}", Switch).value,
+                pct.first(Input).value if pct else None,
+            )
+        )
+    return out
+
+
+async def pick(pilot, s: SettingsScreen, key: str) -> None:
+    s.query_one("#util-shape", Select).value = key
+    await pilot.pause(0.2)  # the rows are rebuilt asynchronously
+
+
+async def test_a_custom_layout_keeps_its_shape_and_edits_its_commands(herdr, cfg_path, monkeypatch):
     head = cfg_path.read_text().split("\n\n[utility]")[0]
-    cfg_path.write_text(f"{head}\n\n{CUSTOM_PANES}")
-    app = CorralApp(config.load(cfg_path), herdr, config_path=cfg_path)
+    app = settings_app(herdr, cfg_path, f"{head}\n\n{CUSTOM_PANES}", monkeypatch)
     async with app.run_test(size=(160, 50)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-utility")
-        keys = ("top", "bottom_left", "bottom_right", "top_percent", "bottom_left_percent")
-        assert all(s.query_one(f"#util-{k}", Input).disabled for k in keys)
-        s.query_one("#util-enabled", Switch).value = False
-        s.query_one("#util-enabled", Switch).value = True
-        await pilot.pause(0.1)
-        assert all(s.query_one(f"#util-{k}", Input).disabled for k in keys)
-        assert "change it in the config file" in str(s.query_one("#util-note").render())
-        assert str(s.query_one("#util-diagram").render()) == "[files]: yazi\ngit: printf '[/x]'"
-        await show_tab(pilot, s, "tab-general")
-        await pilot.click("#nested-folders")
+        assert s.query_one("#util-shape", Select).value == "custom"
+        assert rows(s) == [("[files]", "yazi", False, None), ("git", "printf '[/x]'", False, "40")]
+        assert "change its shape there" in str(s.query_one("#util-note").render())
+        unit = [str(w.render()) for w in s.query("#util-panes Label.unit")]
+        assert "% of [files]'s width" in unit
+        assert not s.query_one("#util-cmd-1", Input).disabled
+        s.query_one("#util-cmd-1", Input).value = "tig"
         await pilot.press("ctrl+s")
         await settle(pilot, app)
         assert not isinstance(app.screen, SettingsScreen)
     text = cfg_path.read_text()
-    assert "nested_folders = true" in text
-    assert text.endswith(CUSTOM_PANES)
+    assert text.endswith(CUSTOM_PANES.replace("printf '[/x]'", "tig"))
+
+
+async def test_custom_again_restores_the_files_shape(herdr, cfg_path, monkeypatch):
+    head = cfg_path.read_text().split("\n\n[utility]")[0]
+    app = settings_app(herdr, cfg_path, f"{head}\n\n{CUSTOM_PANES}", monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        await pick(pilot, s, "stacked")
+        assert "Pick a layout" in str(s.query_one("#util-note").render())
+        s.query_one("#util-cmd-1", Input).value = "tig"
+        s.query_one("#util-pct-1", Input).value = "30"
+        await pilot.pause(0.1)
+        assert [r[0] for r in rows(s)] == ["top", "bottom"]
+        await pick(pilot, s, "custom")
+        assert rows(s) == [("[files]", "yazi", False, None), ("git", "tig", False, "30")]
+        assert s.collect().utility.panes == (
+            config.Pane("[files]", "yazi"),
+            config.Pane("git", "tig", "[files]", "right", 30, focus=True),
+        )
+
+
+SHORTHAND_DEFAULT = '[utility]\ntop = "yazi"\n'
+
+
+async def test_the_default_layout_opens_on_its_preset_and_saves_unchanged(
+    herdr, cfg_path, root, monkeypatch
+):
+    text = f'root = "{root}"\n\n{SHORTHAND_DEFAULT}'
+    app = settings_app(herdr, cfg_path, text, monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        shape = s.query_one("#util-shape", Select)
+        assert shape.value == "top_two"
+        assert [v for _, v in s.shape_options()] == [p.key for p in PRESETS]  # no Custom
+        assert rows(s) == [
+            ("top", "yazi", False, None),
+            ("bottom_left", "", False, "50"),
+            ("bottom_right", "lazygit", True, "65"),
+        ]
+        await pick(pilot, s, "top_two")  # the current shape: nothing changes
+        assert not s.dirty()
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    assert cfg_path.read_text() == text
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p.key)
+async def test_picking_a_preset_saves_its_shape(herdr, cfg_path, root, monkeypatch, preset):
+    app = settings_app(herdr, cfg_path, f'root = "{root}"\n', monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        await pick(pilot, s, preset.key)
+        assert [r[0] for r in rows(s)] == [p.name for p in preset.panes]
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    assert config.load_file(cfg_path).utility.panes == reshape(Utility().panes, preset.panes)
+
+
+async def test_switching_shape_keeps_values_by_position(herdr, cfg_path, root, monkeypatch):
+    app = settings_app(herdr, cfg_path, f'root = "{root}"\n', monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        await pick(pilot, s, "grid")
+        assert rows(s) == [
+            ("top_left", "yazi", False, None),
+            ("bottom_left", "", False, "50"),
+            ("top_right", "lazygit", True, "65"),
+            ("bottom_right", "", False, "50"),
+        ]
+        units = [str(w.render()) for w in s.query("#util-panes Label.unit")]
+        assert "% of top_left's height" in units
+        assert "% of bottom_left's width" in units
+
+
+async def test_the_shorthand_is_kept_while_it_fits(app, herdr, cfg_path):
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        s.query_one("#util-pct-1", Input).value = "60"
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    u = saved(cfg_path)["utility"]
+    assert u["top_percent"] == 40
+    assert "panes" not in u
+
+    app = CorralApp(config.load(cfg_path), herdr, config_path=cfg_path)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        await pick(pilot, s, "grid")
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert not isinstance(app.screen, SettingsScreen)
+    assert "[[utility.panes]]" in cfg_path.read_text()
+    u = saved(cfg_path)["utility"]
+    assert not set(config.SHORTHAND_KEYS) & set(u)
+    assert [p["name"] for p in u["panes"]] == [p.name for p in PRESETS[-1].panes]
+
+
+async def test_a_bad_size_names_its_pane(app, cfg_path, monkeypatch):
+    before = cfg_path.read_text()
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        notes = []
+        monkeypatch.setattr(s, "notify", lambda message, **kw: notes.append(message))
+        s.query_one("#util-pct-2", Input).value = "abc"
+        await pilot.press("ctrl+s")
+        await settle(pilot, app)
+        assert app.screen is s
+        assert notes == ["bottom_right size: use 10 to 90%"]
+    assert cfg_path.read_text() == before
+
+
+async def test_the_enabled_switch_disables_the_picker_and_rows(app):
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        widgets = [s.query_one("#util-shape"), *s.query("#util-panes Input, #util-panes Switch")]
+        assert len(widgets) == 1 + 3 + 3 + 2
+        s.query_one("#util-enabled", Switch).value = False
+        await pilot.pause(0.1)
+        assert all(w.disabled for w in widgets)
+        assert "no utility tab" in str(s.query_one("#util-diagram").render())
+        s.query_one("#util-enabled", Switch).value = True
+        await pilot.pause(0.1)
+        assert not any(w.disabled for w in widgets)
 
 
 async def test_add_remove_and_reorder_default_agents(app, cfg_path):
@@ -268,7 +440,8 @@ async def test_cancel_asks_only_when_something_changed(app, cfg_path):
         await show_tab(pilot, s, "tab-utility")
         await pilot.click("#util-enabled")
         assert s.query_one("#util-enabled", Switch).value is False
-        assert s.query_one("#util-top", Input).disabled
+        assert s.query_one("#util-cmd-0", Input).disabled
+        assert s.query_one("#util-shape", Select).disabled
         await pilot.press("escape")
         await pilot.pause(0.3)  # not settle: the cancel worker waits on the dialog
         assert isinstance(app.screen, Confirm)
@@ -358,18 +531,13 @@ async def test_utility_sizes_are_saved_and_checked(app, cfg_path):
     async with app.run_test(size=(160, 50)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-utility")
-        assert s.query_one("#util-bottom_left_percent", Input).value == "35"
-        s.query_one("#util-top_percent", Input).value = "95"
+        assert s.query_one("#util-pct-2", Input).value == "65"
+        s.query_one("#util-pct-1", Input).value = "95"
         await pilot.press("ctrl+s")
         await settle(pilot, app)
         assert app.screen is s  # out of range: not saved
-        s.query_one("#util-top_percent", Input).value = "40"
-        s.query_one("#util-bottom_left_percent", Input).value = "30"
-        await pilot.pause(0.1)
-        diagram = str(s.query_one("#util-diagram").render())
-        assert "true 40%" in diagram
-        assert "shell 30%" in diagram
-        assert "true 70%" in diagram
+        s.query_one("#util-pct-1", Input).value = "60"
+        s.query_one("#util-pct-2", Input).value = "70"
         await pilot.press("ctrl+s")
         await settle(pilot, app)
         assert not isinstance(app.screen, SettingsScreen)
@@ -401,9 +569,9 @@ async def test_install_a_missing_tool_from_settings(app, no_lazygit):
     async with app.run_test(size=(160, 60)) as pilot:
         s = await open_settings(pilot, app)
         await show_tab(pilot, s, "tab-utility")
-        s.query_one("#util-bottom_right", Input).value = "lazygit"
+        s.query_one("#util-cmd-2", Input).value = "lazygit"
         await pilot.pause(0.1)
-        assert "install it below" in str(s.query_one("#util-bottom_right-status").render())
+        assert "install it below" in str(s.query_one("#util-status-2").render())
         assert s.query_one("#tool-lazygit-install").has_class("hidden") is False
         assert "brew install lazygit" in str(s.query_one("#tool-lazygit-status").render())
         s.query_one("#tool-lazygit-install", Button).press()
@@ -413,7 +581,7 @@ async def test_install_a_missing_tool_from_settings(app, no_lazygit):
         await pilot.pause(0.5)
         assert app.screen is s
         assert "lazygit" in no_lazygit
-        assert "✓" in str(s.query_one("#util-bottom_right-status").render())
+        assert "✓" in str(s.query_one("#util-status-2").render())
         assert s.query_one("#tool-lazygit-install").has_class("hidden")
 
 
@@ -508,3 +676,104 @@ async def test_upgrades_screen(app, harness_calls):
         await pilot.press("escape")
         await pilot.pause(0.1)
         assert not isinstance(app.screen, UpgradeScreen)
+
+
+GRID_50 = """\
+┌─────────────────────┬──────────────────────┐
+│                     │                      │
+│       top_left      │      top_right       │
+│        shell        │        shell         │
+│                     │                      │
+│                     │                      │
+├─────────────────────┼──────────────────────┤
+│                     │                      │
+│     bottom_left     │     bottom_right     │
+│        shell        │        shell         │
+│                     │                      │
+└─────────────────────┴──────────────────────┘"""
+
+DEFAULT_LAYOUT = """\
+┌────────────────────────────────────────────┐
+│                                            │
+│                    top                     │
+│                    yazi                    │
+│                                            │
+│                                            │
+├───────────────┬────────────────────────────┤
+│               │                            │
+│  bottom_left  │        bottom_right        │
+│     shell     │          lazygit           │
+│               │                            │
+└───────────────┴────────────────────────────┘"""
+
+
+def test_layout_diagram_draws_to_scale():
+    assert layout_diagram(PRESETS[-1].panes) == GRID_50
+    assert layout_diagram(Utility().panes) == DEFAULT_LAYOUT
+
+
+def test_layout_diagram_of_one_pane():
+    drawn = (layout_diagram((config.Pane("main", "htop -d 5"),)) or "").splitlines()
+    assert drawn[0] == "┌" + "─" * 44 + "┐"
+    assert drawn[-1] == "└" + "─" * 44 + "┘"
+    assert len(drawn) == 12
+    assert all(line.startswith("│") and line.endswith("│") for line in drawn[1:-1])
+    assert [line.strip("│ ") for line in drawn[1:-1] if line.strip("│ ")] == ["main", "htop"]
+
+
+def test_layout_diagram_with_one_row_shows_only_the_name():
+    panes = (config.Pane("a"), config.Pane("b", "htop", "a", "down", 70))
+    drawn = layout_diagram(panes, w=10, h=4) or ""
+    assert (
+        drawn
+        == "┌──────────┐\n│    a     │\n├──────────┤\n│    b     │\n│   htop   │\n└──────────┘"
+    )
+
+
+TOO_FINE = (
+    config.Pane("p0"),
+    *(config.Pane(f"p{i}", "", f"p{i - 1}", "down", 10) for i in range(1, 6)),
+)
+
+
+def test_a_layout_too_fine_to_draw_is_none():
+    assert layout_diagram(TOO_FINE) is None
+
+
+def custom_file(root, panes) -> str:
+    cfg = config.Config(root=root, utility=Utility(panes=panes))
+    return tomlkit.dumps({"root": str(root), "utility": config.to_data(cfg)["utility"]})
+
+
+async def test_the_screen_draws_the_layout(herdr, cfg_path, root, monkeypatch):
+    app = settings_app(herdr, cfg_path, f'root = "{root}"\n', monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        assert str(s.query_one("#util-diagram").render()) == DEFAULT_LAYOUT
+        await pick(pilot, s, "grid")
+        want = layout_diagram(reshape(Utility().panes, PRESETS[-1].panes))
+        assert str(s.query_one("#util-diagram").render()) == want
+        s.query_one("#util-pct-1", Input).value = "30"
+        await pilot.pause(0.1)
+        assert str(s.query_one("#util-diagram").render()) == layout_diagram(s.read_panes())
+
+
+async def test_the_screen_shows_names_literally_and_lists_what_it_cant_draw(
+    herdr, cfg_path, root, monkeypatch
+):
+    panes = (config.Pane("[x]", "yazi"), config.Pane("[/y]", "", "[x]", "right", 50))
+    app = settings_app(herdr, cfg_path, custom_file(root, panes), monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        drawn = str(s.query_one("#util-diagram").render())
+        assert "[x]" in drawn
+        assert "[/y]" in drawn
+
+    app = settings_app(herdr, cfg_path, custom_file(root, TOO_FINE), monkeypatch)
+    async with app.run_test(size=(160, 50)) as pilot:
+        s = await open_settings(pilot, app)
+        await show_tab(pilot, s, "tab-utility")
+        listed = str(s.query_one("#util-diagram").render())
+        assert listed == "\n".join(f"p{i}: shell" for i in range(6))
