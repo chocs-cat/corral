@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
+from collections.abc import Callable
 
 from textual.worker import WorkerCancelled
 
@@ -24,3 +26,18 @@ async def settle(pilot, app, seconds=0.3, timeout=10.0) -> None:
                 with contextlib.suppress(WorkerCancelled):
                     await asyncio.shield(w.wait())
     await pilot.pause(0.1)
+
+
+async def wait_for(
+    pilot, check: Callable[[], bool], timeout: float = 5.0, step: float = 0.02
+) -> None:
+    """Pause until `check()` holds, for work the app finishes in its own time
+    (a handler that awaits a remount) rather than in a worker."""
+    deadline = time.monotonic() + timeout
+    while True:
+        late = time.monotonic() >= deadline  # read first: one last check at the deadline
+        if check():
+            return
+        if late:
+            raise AssertionError(f"condition not met within {timeout} s")
+        await pilot.pause(step)

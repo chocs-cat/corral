@@ -6,7 +6,7 @@ import pytest
 from textual.app import App
 from textual.worker import WorkerFailed, WorkerState
 
-from tests.tui_helpers import settle
+from tests.tui_helpers import settle, wait_for
 
 
 class Superseded(App):
@@ -59,3 +59,27 @@ async def test_settle_times_out_on_a_worker_that_never_finishes():
         app.release.set()
         await settle(pilot, app, seconds=0)
         assert app.worker.state == WorkerState.SUCCESS
+
+
+class Flips(App):
+    def on_mount(self) -> None:
+        self.ready = False
+        self.set_timer(0.1, self.flip)
+
+    def flip(self) -> None:
+        self.ready = True
+
+
+async def test_wait_for_returns_once_the_check_holds():
+    app = Flips()
+    async with app.run_test() as pilot:
+        assert not app.ready
+        await wait_for(pilot, lambda: app.ready)
+        assert app.ready
+
+
+async def test_wait_for_fails_when_the_check_never_holds():
+    app = App()
+    async with app.run_test() as pilot:
+        with pytest.raises(AssertionError, match=r"condition not met within 0\.2 s"):
+            await wait_for(pilot, lambda: False, timeout=0.2)
