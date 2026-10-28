@@ -819,18 +819,62 @@ def _standard(table):
     return out
 
 
-def _to_header(doc, key: str):
-    """Replace the inline table `doc[key]` with a standard one under its own
-    [header] (DEC-29), one blank line before it. tomlkit moves it after the
-    file's bare keys; the blank lines that followed the inline key go with
-    it, and those left before the header fold into one."""
+def _dotted(doc, key: str) -> bool:
+    """Whether the file writes the top-level table `key` as dotted keys
+    (`utility.top = …`) among its bare keys (DEC-30)."""
+    return any(k is not None and k.key == key and k.is_dotted() for k, _ in doc.body)
+
+
+def _undotted(value: dict):
+    """A standard table holding a dotted table's values, keyed from its
+    header (`claude.command = …` under [harnesses]) (DEC-30)."""
+    out = tomlkit.table(is_super_table=False)
+
+    def put(v: dict, path: tuple[str, ...]) -> None:
+        for k, x in v.items():
+            if isinstance(x, dict):
+                put(x, (*path, k))
+            else:
+                out[tomlkit.key([*path, k]) if path else k] = x
+
+    put(value, ())
+    return out
+
+
+def _drop_dotted(doc, key: str) -> None:
+    """Remove the dotted lines of `doc[key]`. A blank line left next to
+    another (or at the file's start) by a removed line goes too."""
     body = doc.body
-    old = next(n for n, (k, _) in enumerate(body) if k is not None and k.key == key)
-    n = old + 1
-    while n < len(body) and isinstance(body[n][1], (Whitespace, Null)):
-        body[n] = (None, Null())
-        n += 1
-    table = doc[key] = _standard(doc[key])
+    mine = {n for n, (k, _) in enumerate(body) if k is not None and k.key == key}
+    after_blank, removed = True, False
+    for n, (_, item) in enumerate(body):
+        if n in mine:
+            removed = True
+        elif isinstance(item, Whitespace) and after_blank and removed:
+            body[n] = (None, Null())
+        elif not isinstance(item, Null):
+            after_blank, removed = isinstance(item, Whitespace), False
+    del doc[key]
+
+
+def _to_header(doc, key: str):
+    """Replace the inline or dotted table `doc[key]` with a standard one
+    under its own [header] (DEC-29, DEC-30), one blank line before it.
+    tomlkit moves an inline table after the file's bare keys, and the blank
+    lines that followed it go with it; a dotted one is added after them, its
+    lines removed. Blank lines left before the header fold into one."""
+    body = doc.body
+    if _dotted(doc, key):
+        table = _undotted(_plain(doc[key]))
+        _drop_dotted(doc, key)
+        doc[key] = table
+    else:
+        old = next(n for n, (k, _) in enumerate(body) if k is not None and k.key == key)
+        n = old + 1
+        while n < len(body) and isinstance(body[n][1], (Whitespace, Null)):
+            body[n] = (None, Null())
+            n += 1
+        table = doc[key] = _standard(doc[key])
     i = next(n for n, (k, _) in enumerate(body) if k is not None and k.key == key)
     start = i
     while start > 0 and isinstance(body[start - 1][1], (Whitespace, Null)):
@@ -894,6 +938,12 @@ def _put_utility(doc, u: Utility) -> None:
         return
     if not has_table:
         table = doc["utility"] = tomlkit.table()
+    panes = [_pane_data(p) for p in u.panes]
+    rebuilt = not ("panes" in table and _same_ids(table["panes"], panes, "name"))
+    if rebuilt and (isinstance(table, InlineTable) or _dotted(doc, "utility")):
+        # An inline table can't hold [[utility.panes]] (DEC-29); after dotted
+        # keys it would take the bare keys that follow them (DEC-30).
+        table = _to_header(doc, "utility")
     for k in SHORTHAND_KEYS:
         if k in table:
             del table[k]
@@ -906,17 +956,14 @@ def _put_utility(doc, u: Utility) -> None:
         same = False
     if same:
         return
-    panes = [_pane_data(p) for p in u.panes]
-    if isinstance(table, InlineTable) and not (
-        "panes" in table and _same_ids(table["panes"], panes, "name")
-    ):
-        # An inline table can't hold [[utility.panes]] (DEC-29).
-        table = _to_header(doc, "utility")
+    if "panes" in table:
+        _put_tables(table, "panes", panes, "name", PANE_DEFAULTS)
+        return
     # Blank lines and comments at the table's end lead into what follows it:
     # keep them after the panes when the panes are new here.
     body = table.value.body
     trailing = []
-    while "panes" not in table and body and body[-1][0] is None:
+    while body and body[-1][0] is None:
         trailing.insert(0, body.pop())
     _put_tables(table, "panes", panes, "name", PANE_DEFAULTS)
     table["panes"][-1].value.body.extend(trailing)

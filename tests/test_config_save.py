@@ -267,7 +267,7 @@ def test_the_template_is_the_default_layout_as_a_list():
 # --- inline tables a save has to restructure (DEC-29, #68) -------------------
 
 
-def save_inline(tmp_path, text: str, change) -> str:
+def save_text(tmp_path, text: str, change) -> str:
     """Write `text`, load it, apply `change`, save; the result must parse and
     reload to the settings saved."""
     f = tmp_path / "c.toml"
@@ -298,7 +298,7 @@ def add_pane(c: config.Config) -> None:
 
 def test_an_inline_utility_becomes_a_table_when_panes_are_added(tmp_path, monkeypatch):
     monkeypatch.delenv("CORRAL_ROOT", raising=False)
-    text = save_inline(tmp_path, INLINE_UTILITY, add_pane)
+    text = save_text(tmp_path, INLINE_UTILITY, add_pane)
     assert "utility = {" not in text
     assert "\n\n[utility]\n[[utility.panes]]\n" in text
     assert text.count("[[utility.panes]]") == 4
@@ -330,7 +330,7 @@ def swap_panes(c: config.Config) -> None:
 
 def test_inline_panes_become_tables_when_reordered(tmp_path, monkeypatch):
     monkeypatch.delenv("CORRAL_ROOT", raising=False)
-    text = save_inline(tmp_path, INLINE_PANES, swap_panes)
+    text = save_text(tmp_path, INLINE_PANES, swap_panes)
     assert "panes = [" not in text
     assert text.count("[[utility.panes]]") == 2
     assert text.index('name = "shell"') < text.index('name = "files"')
@@ -343,7 +343,7 @@ def test_inline_panes_become_tables_when_a_pane_is_added(tmp_path, monkeypatch):
         extra = config.Pane("log", "tail -f x", "shell", "down", 30)
         c.utility = replace(c.utility, panes=(*c.utility.panes, extra))
 
-    text = save_inline(tmp_path, INLINE_PANES, add)
+    text = save_text(tmp_path, INLINE_PANES, add)
     assert "panes = [" not in text
     assert text.count("[[utility.panes]]") == 3
 
@@ -354,7 +354,7 @@ def test_inline_panes_become_tables_when_a_pane_is_removed(tmp_path, monkeypatch
     def remove(c: config.Config) -> None:
         c.utility = replace(c.utility, panes=c.utility.panes[:1])
 
-    text = save_inline(tmp_path, INLINE_PANES, remove)
+    text = save_text(tmp_path, INLINE_PANES, remove)
     assert "panes = [" not in text
     assert text.count("[[utility.panes]]") == 1
     assert "shell" not in text
@@ -366,7 +366,7 @@ def test_an_inline_utility_with_inline_panes_becomes_tables(tmp_path, monkeypatc
         "40 }]\n", "40 }] }\n"
     )
     assert "utility = { panes = [{" in text
-    text = save_inline(tmp_path, text, swap_panes)
+    text = save_text(tmp_path, text, swap_panes)
     assert "utility = {" not in text
     assert "panes = [" not in text
     assert 'root = "~/Code"\n\n[utility]\n' in text
@@ -398,7 +398,7 @@ def test_inline_models_become_tables(tmp_path, monkeypatch, change, keys):
     def edit(c: config.Config) -> None:
         c.custom_models = change(c.custom_models)
 
-    text = save_inline(tmp_path, INLINE_MODELS, edit)
+    text = save_text(tmp_path, INLINE_MODELS, edit)
     assert "models = [" not in text
     assert text.count("[[models]]") == len(keys)
     assert [m["key"] for m in tomllib.loads(text)["models"]] == keys
@@ -414,7 +414,7 @@ def test_value_only_edits_keep_inline_tables_inline(tmp_path, monkeypatch):
         files, shell = c.utility.panes
         c.utility = replace(c.utility, panes=(replace(files, command="nnn"), shell))
 
-    text = save_inline(tmp_path, INLINE_PANES, command)
+    text = save_text(tmp_path, INLINE_PANES, command)
     assert "panes = [{" in text
     assert "[[" not in text
     assert 'command = "nnn"' in text
@@ -423,7 +423,7 @@ def test_value_only_edits_keep_inline_tables_inline(tmp_path, monkeypatch):
         gem, big = c.custom_models
         c.custom_models = (replace(gem, display="Gem"), big)
 
-    text = save_inline(tmp_path, INLINE_MODELS, display)
+    text = save_text(tmp_path, INLINE_MODELS, display)
     assert "models = [{" in text
     assert "[[" not in text
     assert 'display = "Gem"' in text
@@ -431,5 +431,141 @@ def test_value_only_edits_keep_inline_tables_inline(tmp_path, monkeypatch):
     def top(c: config.Config) -> None:
         c.utility = config.Utility.shorthand(top="htop")
 
-    text = save_inline(tmp_path, INLINE_UTILITY, top)
+    text = save_text(tmp_path, INLINE_UTILITY, top)
     assert text == INLINE_UTILITY.replace('{ top = "yazi" }', '{ top = "htop" }')
+
+
+# --- dotted keys a save has to restructure (DEC-30, #72) ---------------------
+
+DOTTED_TOP = 'root = "~/Code"\nutility.top = "yazi"\nscan_depth = 2\n'
+
+
+def to_grid(c: config.Config) -> None:
+    grid = next(p for p in config.PRESETS if p.key == "grid")
+    c.utility = replace(c.utility, panes=config.reshape(c.utility.panes, grid.panes))
+
+
+def test_a_dotted_utility_becomes_a_table_when_switched_to_a_list(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = save_text(tmp_path, DOTTED_TOP, to_grid)
+    assert "\n\n[utility]\n[[utility.panes]]\n" in text
+    assert "utility." not in text.replace("[utility.panes]", "")
+    assert text.index("scan_depth = 2") < text.index("[utility]")  # still top-level
+    assert tomllib.loads(text)["scan_depth"] == 2
+    assert text.count("[[utility.panes]]") == 4
+
+
+def test_adjacent_dotted_lines_at_the_end_become_a_table(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = 'root = "~/Code"\nscan_depth = 2\nutility.top = "yazi"\nutility.bottom_left = "htop"\n'
+    text = save_text(tmp_path, text, add_pane)
+    assert text.startswith('root = "~/Code"\nscan_depth = 2\n\n[utility]\n[[utility.panes]]\n')
+    assert "utility." not in text.replace("[utility.panes]", "")
+    assert [p["command"] for p in tomllib.loads(text)["utility"]["panes"]][:2] == ["yazi", "htop"]
+
+
+def test_dotted_lines_split_by_a_bare_key_become_one_table(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = 'root = "~/Code"\nutility.top = "yazi"\nscan_depth = 2\nutility.enabled = true\n'
+    text = save_text(tmp_path, text, add_pane)
+    assert text.startswith('root = "~/Code"\nscan_depth = 2\n\n[utility]\nenabled = true\n')
+    assert "utility." not in text.replace("[utility.panes]", "")
+    assert tomllib.loads(text)["utility"]["enabled"] is True
+
+
+DOTTED_PANES = (
+    'root = "~/Code"\n'
+    'utility.panes = [{ name = "files", command = "yazi" }, '
+    '{ name = "shell", split = "files", direction = "right", percent = 40 }]\n'
+    "scan_depth = 2\n"
+)
+
+
+def test_dotted_panes_become_tables_when_rebuilt(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+
+    def add(c: config.Config) -> None:
+        extra = config.Pane("log", "tail -f x", "shell", "down", 30)
+        c.utility = replace(c.utility, panes=(*c.utility.panes, extra))
+
+    text = save_text(tmp_path, DOTTED_PANES, add)
+    assert text.startswith('root = "~/Code"\nscan_depth = 2\n\n[utility]\n[[utility.panes]]\n')
+    assert "panes = [" not in text
+    assert text.count("[[utility.panes]]") == 3
+
+
+def test_a_comment_above_dotted_keys_stays_where_it_was(tmp_path, monkeypatch):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    text = (
+        'root = "~/Code"\n'
+        "# my utility tab\n"
+        'utility.top = "yazi"  # file manager\n'
+        "scan_depth = 2\n"
+        "\n"
+        "# the upgrade command\n"
+        "[harnesses.claude]\n"
+        'command = "claude update"\n'
+    )
+    text = save_text(tmp_path, text, add_pane)
+    assert text.startswith('root = "~/Code"\n# my utility tab\nscan_depth = 2\n\n')
+    assert '# the upgrade command\n[harnesses.claude]\ncommand = "claude update"\n' in text
+    assert "\n\n[utility]\n[[utility.panes]]\n" in text
+    assert "\n\n\n" not in text
+
+
+@pytest.mark.parametrize(
+    ("text", "change"),
+    [
+        (DOTTED_TOP, lambda c: setattr(c, "utility", config.Utility.shorthand(top="htop"))),
+        (
+            DOTTED_TOP,
+            lambda c: setattr(c, "utility", config.Utility.shorthand(bottom_left="btop")),
+        ),
+        (DOTTED_TOP, lambda c: setattr(c, "utility", replace(c.utility, enabled=False))),
+        (
+            DOTTED_PANES + "utility.enabled = true\n",
+            lambda c: setattr(
+                c,
+                "utility",
+                replace(
+                    c.utility,
+                    panes=(replace(c.utility.panes[0], command="nnn"), c.utility.panes[1]),
+                ),
+            ),
+        ),
+    ],
+    ids=["changed-top", "added-bottom-left", "disabled", "pane-value"],
+)
+def test_saves_that_add_no_table_keep_dotted_keys(tmp_path, monkeypatch, text, change):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    out = save_text(tmp_path, text, change)
+    assert "utility." in out
+    assert "[utility" not in out
+    assert out.startswith('root = "~/Code"\n')
+
+
+@pytest.mark.parametrize(
+    ("text", "head"),
+    [
+        (
+            'root = "~/Code"\nutility.top = "yazi"\n# between\nutility.bottom_left = "x"\n'
+            "scan_depth = 2\n",
+            'root = "~/Code"\n# between\nscan_depth = 2\n\n[utility]\n',
+        ),
+        (
+            'utility.top = "yazi"\n\nroot = "~/Code"\nscan_depth = 2\n',
+            'root = "~/Code"\nscan_depth = 2\n\n[utility]\n',
+        ),
+        (
+            'root = "~/Code"\n\nutility.top = "yazi"\nutility.bottom_left = "x"\n'
+            "\nscan_depth = 2\n",
+            'root = "~/Code"\n\nscan_depth = 2\n\n[utility]\n',
+        ),
+    ],
+    ids=["comment-between", "file-start", "own-paragraph"],
+)
+def test_removed_dotted_lines_leave_no_extra_blank_lines(tmp_path, monkeypatch, text, head):
+    monkeypatch.delenv("CORRAL_ROOT", raising=False)
+    out = save_text(tmp_path, text, add_pane)
+    assert out.startswith(head + "[[utility.panes]]\n")
+    assert "\n\n\n" not in out
