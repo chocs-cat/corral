@@ -28,14 +28,9 @@ from corral.tui.settings import (
     layout_diagram,
 )
 from corral.tui.upgrades import UpgradeScreen
+from tests.tui_helpers import settle, wait_for
 
 B = "•"
-
-
-async def settle(pilot, app, seconds=0.3):
-    await pilot.pause(seconds)
-    await app.workers.wait_for_complete()
-    await pilot.pause(0.1)
 
 
 @pytest.fixture
@@ -167,8 +162,26 @@ def rows(s: SettingsScreen) -> list[tuple[str, str, bool, str | None]]:
 
 
 async def pick(pilot, s: SettingsScreen, key: str) -> None:
+    """Choose a shape and wait for shape_changed to finish (#75): it sets the
+    shape, remounts the rows, updates the note, then redraws the diagram. The
+    old state already agrees with itself, so the shape is checked too, and the
+    note can be unchanged (preset to preset), so the diagram is the last word."""
     s.query_one("#util-shape", Select).value = key
-    await pilot.pause(0.2)  # the rows are rebuilt asynchronously
+
+    def rebuilt() -> bool:
+        drawn = layout_diagram(s.util_layout)
+        return (
+            s.shape == key
+            and [r[0] for r in rows(s)] == [p.name for p in s.util_layout]
+            and str(s.query_one("#util-note").render()) == s.util_note()
+            and (
+                not drawn
+                or not s.query_one("#util-enabled", Switch).value
+                or str(s.query_one("#util-diagram").render()) == drawn
+            )
+        )
+
+    await wait_for(pilot, rebuilt)
 
 
 async def test_a_custom_layout_keeps_its_shape_and_edits_its_commands(herdr, cfg_path, monkeypatch):

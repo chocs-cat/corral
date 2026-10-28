@@ -83,9 +83,10 @@ a bug, stopped and closed the user's real workspace. So:
 - `ops`/CLI: FakeHerdr. Its errors go through the real
   `corral.herdr.parse_response`, so they carry the codes herdr would.
 - TUI: `App.run_test()` with FakeHerdr (`tests/test_tui.py`,
-  `tests/test_settings_tui.py`). A test helper that waits for all workers
-  (`app.workers.wait_for_complete()`) hangs while a worker is waiting on a
-  dialog (`push_screen_wait`); use `pilot.pause()` there.
+  `tests/test_settings_tui.py`). They settle with `tests/tui_helpers.settle`,
+  which counts a superseded (cancelled) worker as settled and fails with
+  `TimeoutError` rather than hanging while a worker waits on a dialog
+  (`push_screen_wait`); use `pilot.pause()` there.
 - App-level key bindings fire on every screen. `CorralApp.check_action`
   disables the project list's keys while another screen is on top; add new
   main-screen actions to `MAIN_SCREEN_ACTIONS`.
