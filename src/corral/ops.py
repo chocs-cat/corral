@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from corral import labels, tools
+from corral import aliases, labels, tools
 from corral.config import Config, ConfigError, expand_user
 from corral.herdr import Herdr, HerdrError, Snapshot
 from corral.projects import agent_tabs, find_workspace, label_for, match_workspaces, scan
@@ -354,7 +354,7 @@ def up(
     existing                -> focus it, change nothing
     new                     -> build another even if the label is taken
     """
-    path = path.expanduser().resolve()
+    path = aliases.follow(path.expanduser()).resolve()
     if not path.is_dir():
         raise ConfigError(f"not a directory: {path}")
     label = label or label_for(path, cfg.root)
@@ -707,7 +707,7 @@ def reveal(
             err = "ambiguous: " + ", ".join(w.id for w in orphans)
         elif orphans:
             ws = orphans[0].id
-        elif (d := expand_user(target)) is not None and d.is_dir():
+        elif (d := expand_user(target)) is not None and (d := aliases.follow(d)).is_dir():
             path = str(d.resolve())
         elif snap:
             err = "not found"

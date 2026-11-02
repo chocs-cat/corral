@@ -41,7 +41,9 @@ or `exited` for an agent tab whose agent has gone. `other_workspaces` lists
 workspaces that belong to no project under the root.
 
 Project labels are paths relative to the root: a nested repo is
-`shop/api`. A plain folder nested below a top-level folder (one that isn't a
+`shop/api`. A symlink or Finder alias in the root that points to a directory
+is a project under the link's name, and `ls` gives the directory it leads to
+as its path. A plain folder nested below a top-level folder (one that isn't a
 git repo and holds none) appears in `ls`, with `is_repo: false`, only when
 the config's `nested_folders` is on; a folder inside a git repo never does.
 The home directory is always a project, listed first and

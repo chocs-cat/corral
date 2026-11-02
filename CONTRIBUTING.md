@@ -17,6 +17,7 @@ The code is laid out in layers, each depending only on the ones above it:
 | `herdr.py` | typed wrapper over the `herdr` CLI; raises `HerdrError(code, message)` |
 | `config.py` | XDG TOML config over built-in defaults, including the built-in models read from Claude Code and Codex; `save` writes it back, keeping comments (tomlkit) |
 | `labels.py` | `Model•effort[-N]` tab labels and agent names |
+| `aliases.py` | following Finder aliases on macOS (Core Foundation, through ctypes) |
 | `projects.py` | scanning the root, workspace matching |
 | `tools.py` | the utility tab's programs (yazi, lazygit): status and installing them |
 | `harnesses.py` | the agent CLIs (Claude Code, Codex): versions, install method, upgrading them |

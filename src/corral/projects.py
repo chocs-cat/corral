@@ -1,14 +1,16 @@
 """Projects under the root, and which herdr workspace belongs to which.
 
-A project is every top-level directory of the root, plus git repos nested up
-to `scan_depth` levels below one and the plain folders that lead to them; with
+A project is every top-level directory of the root (a symlink or Finder alias
+to a directory counts, under the link's name), plus git repos nested up to
+`scan_depth` levels below one and the plain folders that lead to them; with
 `nested_folders` on, every other folder nested up to `scan_depth` levels below
 one too, unless a git repo is above it (DEC-24). The home directory is a
 project too, labelled "~" and listed first.
 
 A project's workspace label is its path relative to the root ("courses",
-"shop/api"); the home directory is "~" and any other directory outside
-the root uses its basename. An existing
+"shop/api"); the home directory is "~", a directory reached through a
+top-level link goes by the link's name, and any other directory outside the
+root uses its basename. An existing
 workspace also matches a nested project when it carries the bare basename
 and one of its panes sits in that directory -- so a workspace made before
 nested labels existed is found rather than duplicated.
@@ -20,7 +22,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from corral import labels
+from corral import aliases, labels
 from corral.config import Config
 from corral.herdr import Snapshot, Workspace
 
@@ -82,7 +84,9 @@ def git_branch(path: Path) -> str:
     return head[:7]
 
 
-def _subdirs(d: Path, prune: frozenset[str], follow_links: bool) -> list[os.DirEntry]:
+def _subdirs(d: Path, prune: frozenset[str], follow_links: bool) -> list[tuple[str, Path]]:
+    """The folders in d, sorted: (name, path). With `follow_links`, symlinks
+    and Finder aliases to folders too; an alias's path is its target."""
     try:
         entries = list(os.scandir(d))
     except OSError:
@@ -93,10 +97,12 @@ def _subdirs(d: Path, prune: frozenset[str], follow_links: bool) -> list[os.DirE
             continue
         try:
             if e.is_dir(follow_symlinks=follow_links):
-                keep.append(e)
+                keep.append((e.name, Path(e.path)))
+            elif follow_links and (target := aliases.follow(Path(e.path))).is_dir():
+                keep.append((e.name, target))
         except OSError:
             pass
-    return sorted(keep, key=lambda e: e.name.lower())
+    return sorted(keep, key=lambda k: k[0].lower())
 
 
 def _nested(
@@ -108,8 +114,8 @@ def _nested(
     if depth > max_depth:
         return []
     found: list[Project] = []
-    for e in _subdirs(d, prune, follow_links=False):
-        sub, srel = Path(e.path), f"{rel}/{e.name}"
+    for name, sub in _subdirs(d, prune, follow_links=False):
+        srel = f"{rel}/{name}"
         is_repo = (sub / ".git").exists()
         below = _nested(sub, srel, depth + 1, max_depth, prune, plain and not is_repo)
         if not (is_repo or below or plain):
@@ -145,17 +151,16 @@ def scan(cfg: Config) -> Tree:
             is_home=True,
         )
         tops.append(HOME)
-    for e in _subdirs(root, cfg.prune, follow_links=True):
-        path = Path(e.path)
+    for name, path in _subdirs(root, cfg.prune, follow_links=True):
         is_repo = (path / ".git").exists()
         plain = cfg.nested_folders and not is_repo
-        below = _nested(path, e.name, 1, cfg.scan_depth, cfg.prune, plain)
+        below = _nested(path, name, 1, cfg.scan_depth, cfg.prune, plain)
         top = Project(
-            rel=e.name,
+            rel=name,
             path=path.resolve(),
             depth=0,
             is_repo=is_repo,
-            children=[k.rel for k in below if k.parent == e.name],
+            children=[k.rel for k in below if k.parent == name],
             repos_below=sum(1 for k in below if k.is_repo),
             branch=git_branch(path),
         )
@@ -174,7 +179,7 @@ HOME = "~"  # the home directory's label
 
 def label_for(path: Path, root: Path) -> str:
     """Relative path under the root, else "~" for the home directory, else
-    the basename."""
+    the path through a top-level link in the root, else the basename."""
     path, root = path.resolve(), root.expanduser().resolve()
     try:
         rel = str(path.relative_to(root))
@@ -182,7 +187,12 @@ def label_for(path: Path, root: Path) -> str:
         rel = "."
     if rel != ".":
         return rel
-    return HOME if path == Path.home().resolve() else path.name
+    if path == Path.home().resolve():
+        return HOME
+    for name, top in _subdirs(root, frozenset(), follow_links=True):
+        if path.is_relative_to(target := top.resolve()):
+            return str(Path(name) / path.relative_to(target))
+    return path.name
 
 
 def find_workspace(snap: Snapshot, label: str, path: Path | None = None) -> Workspace | None:

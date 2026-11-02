@@ -151,3 +151,16 @@ def test_nested_folders_stops_at_the_scan_depth(cfg, root):
     n = projects.scan(cfg).nodes
     assert "scratch/drafts" in n
     assert "scratch/drafts/2025" not in n
+
+
+def test_a_top_level_symlink_is_a_project_under_its_own_name(cfg, root, tmp_path):
+    target = tmp_path / "elsewhere" / "real-name"
+    (target / ".git").mkdir(parents=True)
+    (target / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (root / "linked").symlink_to(target)
+
+    n = projects.scan(cfg).nodes
+    assert n["linked"].path == target.resolve()
+    assert n["linked"].is_repo
+    assert projects.label_for(target, root) == "linked"
+    assert projects.label_for(target / "sub", root) == "linked/sub"

@@ -138,7 +138,9 @@ doesn't restore workspaces.
 
 ### Projects and labels
 
-Every directory in the root is a project. So is every git repo nested up to
+Every directory in the root is a project, and so is a symlink or Finder alias
+in the root that points to one, under the link's name. So is every git repo
+nested up to
 `scan_depth` levels inside one (`shop/api`), along with the plain folders
 that lead to one (`Archive/2024/`). With `nested_folders = true` (or
 *Nested folders* in the settings), every other folder up to `scan_depth`
