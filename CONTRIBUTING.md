@@ -42,7 +42,8 @@ Work on a branch and open a pull request; `master` only takes merges, and
 only once the **CI passed** check is green. That check needs lint (ruff and
 ty), the tests on Linux and macOS with Python 3.11 to 3.13, and a packaging
 check that installs the built wheel and sdist and runs `corral`; a PR that
-only changes `docs/` skips them, and the check passes. PR titles
+only changes paths nothing there reads (`docs/`, agent instructions, this
+file; `SKIP` in `ci.yml` lists them) skips them, and the check passes. PR titles
 must be Conventional Commits. Dependabot opens grouped update PRs weekly
 (`ci(deps)`, `build(deps)`), which don't trigger a release on their own.
 
