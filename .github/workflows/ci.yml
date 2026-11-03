@@ -7,9 +7,9 @@ on:
 
 jobs:
   changes:
-    # Decides whether lint, test and package run. The docs filter lives here,
+    # Decides whether lint, test and package run. The path filter lives here,
     # not in a workflow-level paths-ignore: a skipped workflow never reports
-    # `CI passed`, so a docs-only pull request would wait on it forever.
+    # `CI passed`, so a pull request it skips would wait on it forever.
     name: changes
     runs-on: ubuntu-latest
     permissions:
@@ -21,6 +21,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          # Paths nothing in the checks or the build reads, as an extended
+          # regex: a pull request that touches only these skips lint, test
+          # and package. Never list this workflow; a change to it must run.
+          SKIP: '^(docs/|\.claude-plugin/|AGENTS\.md$|CLAUDE\.md$|CONTRIBUTING\.md$|\.agents/repokit\.toml$|\.github/dependabot\.yml$|\.github/workflows/(formula|release)\.yml$|release-please-config\.json$|\.release-please-manifest\.json$)'
         run: |
           if [ -z "$PR" ]; then
             echo code=true >> "$GITHUB_OUTPUT"
@@ -29,7 +33,7 @@ jobs:
           # Both sides of a rename count, so moving code into docs/ still runs.
           files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
             --jq '.[] | .filename, (.previous_filename // empty)')
-          if grep -qv '^docs/' <<<"$files"; then
+          if grep -qvE "$SKIP" <<<"$files"; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo code=false >> "$GITHUB_OUTPUT"
@@ -99,24 +103,25 @@ jobs:
 
   ok:
     # The one check branch protection requires, so the matrix can change
-    # without editing the protection rule. On a docs-only pull request the
-    # checks are skipped, and only then does a skip count as passing.
+    # without editing the protection rule. On a pull request `changes` found
+    # docs-only the checks are skipped, and only then does a skip count as
+    # passing.
     name: CI passed
     if: always()
     needs: [changes, lint, test, package]
     runs-on: ubuntu-latest
     steps:
+      # jq judges all the results in one expression and `-e` turns false into
+      # exit 1, so a job added to `needs` is covered with no other edit. Don't
+      # rewrite it as a shell loop of `test … || …`: under `bash -e` only the
+      # last iteration's status counts, so an earlier failure passes.
       - env:
-          CODE: ${{ needs.changes.outputs.code }}
-          LINT: ${{ needs.lint.result }}
-          TEST: ${{ needs.test.result }}
-          PACKAGE: ${{ needs.package.result }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          want=success
-          if [ "$CODE" = false ]; then want=skipped; fi
-          test "$LINT" = "$want"
-          test "$TEST" = "$want"
-          test "$PACKAGE" = "$want"
+          jq -e '(.changes.outputs.code == "false") as $docs
+            | del(.changes)
+            | all(.[]; .result == "success" or ($docs and .result == "skipped"))' \
+            <<<"$NEEDS" >/dev/null
 
   commits:
     name: conventional commit titles
